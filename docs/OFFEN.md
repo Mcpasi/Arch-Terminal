@@ -6,7 +6,9 @@ Stand: Version 0.1.8, 7. November 2026.
 
 Der erste Nutzer-Gerätetest mit 0.1.0 konnte Arch herunterladen, scheiterte beim Entpacken an der auf Android verbotenen Hardlink-Erstellung. Seit 0.1.1 werden dafür Dateikopien verwendet. Für 0.1.2 wurde der Tastaturfehler im Android-11-Emulator (AOSP x86_64) reproduziert und durch Aktivieren des Terminal-Touch-Fokus korrigiert. Der Emulator verwendet die echte Activity und JNI-PTY mit einer Android-Shell. Der komplette **ARM64-/PRoot-/Arch-Ablauf auf einem Smartphone ist weiterhin nicht abgenommen**.
 
-Der Arch-Ablauf wurde auf Version 0.1.6 erfolgreich getestet, verifiziert auf einem Redmi Note 14 und einem Redmi 14C.
+**Der Arch-Ablauf wurde auf Version 0.1.6 erfolgreich getestet, verifiziert auf einem Redmi Note 14 und einem Redmi 14C.**
+
+**Version 0.1.8 Wurde auf echter Hardware erfolgreich getestet**
 
 Für 0.1.7 zusätzlich mehrere parallele Arch-/PRoot-Sitzungen auf diesen Geräten prüfen: getrennte Shellzustände und Ausgabe, Wechsel während laufender Befehle, gezieltes Schließen, gemeinsames Beenden, Hintergrund/Rückkehr und Wachhaltung bis zum letzten Prozess. Die Android-Regressionen verwenden dafür temporäre Android-Shells; die Geräteabnahme mit mehreren Arch-Sitzungen bleibt separat.
 
