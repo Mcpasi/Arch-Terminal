@@ -1,5 +1,20 @@
 # Änderungen
 
+## 0.1.8 · versionCode 9
+
+- Beenden über Menü und Android-Benachrichtigung korrigiert: Der gepinnte PRoot ignoriert SIGTERM. Der Dienst sendet jetzt SIGQUIT, wodurch PRoots eigene Bereinigung sämtliche Tracees einschließlich abgekoppelter Prozesse beendet und abwartet. Die generische Terminalbibliothek lässt das Beendigungssignal durch ihren Prozessbesitzer wählen.
+- Nach der letzten Sitzung werden WakeLock und Vordergrundbenachrichtigung ausdrücklich entfernt, auch wenn der Dienst noch gebunden ist. Späte Aktualisierungen und wiederholte Stop-Aktionen erzeugen keine leere Benachrichtigung erneut.
+- Android-Regressionen verwenden echtes PRoot und den produktiven Stop-Backendpfad: einzelne/letzte Sitzung über das Menü, Benachrichtigungs-PendingIntent im Hintergrund, zwei parallele Sitzungen, abgekoppelte Kindprozesse und vollständige Freigabe von Benachrichtigung/WakeLock.
+- App-Version, APK-/Quellarchivnamen und Geräte-Testskript auf 0.1.8 angehoben. Tests und Builds bleiben auf einen Worker begrenzt.
+
+## 0.1.7 · versionCode 8
+
+- Mehrere unabhängige Terminal-Sitzungen in derselben Arch-Installation: Die obere Sitzungsleiste und „Neue Sitzung“ öffnen weitere PTYs; Tabs wechseln zwischen Shells mit eigenem Zustand und Scrollback. Die Navigation bleibt bei ausgeblendeten Zusatztasten verfügbar.
+- Sitzungsverwaltung als Android-unabhängiges `SessionManager`-Modul und Darstellung als eigenes `SessionBar`-Modul umgesetzt. Ein fehlgeschlagener neuer Start erhält vorhandene Sitzungen und Auswahl; Enter ersetzt ausschließlich den beendeten Tab.
+- Einzelne Sitzungen lassen sich per langem Tabdruck oder Menü nach Bestätigung schließen. Die übrigen Prozesse laufen weiter. Menü und Benachrichtigung bieten zusätzlich das gemeinsame Beenden an. Wachhaltung und Dienstlebenszyklus berücksichtigen alle Sitzungen und verspätete Exit-Callbacks.
+- JUnit-Tests für Auswahl, unabhängigen Zustand, Start-/Neustartfehler, stabile Nummerierung, isoliertes Schließen, natürliches Ende, gemeinsame Bereinigung und verspätete Callbacks ergänzt. Android-Instrumentation prüft mehrere echte PTYs samt IME, Tabs, Hintergrund/Rückkehr, Scrollback und WakeLock.
+- Version und APK-/Quellarchivnamen auf 0.1.7 angehoben. Gradle und native Builds verwenden standardmäßig einen Worker; Java-Laufzeiten sehen einen Prozessor und nutzen serielle Garbage Collection, CTest läuft seriell.
+
 ## 0.1.6 · versionCode 7
 
 - Überflüssige Installationsanzeige beim Start eines vorhandenen Arch behoben. Der Installationsmarker wird bereits vor der Dienstverbindung berücksichtigt; solange die Verbindung fehlt, erscheinen weder Installationsbutton noch Downloadhinweise.

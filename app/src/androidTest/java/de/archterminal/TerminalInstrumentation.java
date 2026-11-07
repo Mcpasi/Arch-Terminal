@@ -30,6 +30,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
@@ -51,9 +52,12 @@ public final class TerminalInstrumentation extends Instrumentation {
             testPty();
             testTail();
             testInterrupt();
+            testSessionStopActions(false);
+            testSessionStopActions(true);
             if ("true".equals(arguments.getString("rootfs"))) testArch();
             testStartupLogo();
             testKeyboard();
+            testMultipleSessions();
             result.putString("stream", "\nPASS\n" + passed);
             result.putBoolean("archterminal.success", true);
             finish(Activity.RESULT_OK, result);
@@ -126,8 +130,18 @@ public final class TerminalInstrumentation extends Instrumentation {
         volatile String text = "";
         volatile int exit = Integer.MIN_VALUE;
         TerminalSession session;
-        @Override public void onTextChanged(TerminalSession session) { text = session.getEmulator().getScreen().getTranscriptText(); }
-        @Override public void onSessionFinished(TerminalSession session) { text = session.getEmulator().getScreen().getTranscriptText(); exit = session.getExitStatus(); finished.countDown(); }
+        SessionCallbacks delegate;
+        @Override public void onTextChanged(TerminalSession session) {
+            text = session.getEmulator().getScreen().getTranscriptText();
+            if (delegate != null) delegate.onTextChanged(session);
+        }
+        @Override public void onTitleChanged(TerminalSession session) { if (delegate != null) delegate.onTitleChanged(session); }
+        @Override public void onColorsChanged(TerminalSession session) { if (delegate != null) delegate.onColorsChanged(session); }
+        @Override public void onSessionFinished(TerminalSession session) {
+            text = session.getEmulator().getScreen().getTranscriptText(); exit = session.getExitStatus();
+            if (delegate != null) delegate.onSessionFinished(session);
+            finished.countDown();
+        }
         void awaitText(String expected) throws Exception {
             long deadline = android.os.SystemClock.elapsedRealtime() + 10000;
             while (!text.contains(expected)) {
@@ -178,14 +192,14 @@ public final class TerminalInstrumentation extends Instrumentation {
         Probe probe = shell("exec /system/bin/sh");
         Activity activity = null;
         TerminalService owner = null;
-        TerminalSession previous = null;
+        SessionManager<TerminalSession> previous = null;
         try {
             Intent intent = new Intent(getTargetContext(), MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
             activity = startActivitySync(intent);
             Activity current = activity;
             awaitUi(() -> field(current, "service") != null && current.hasWindowFocus(), "Logo Activity did not connect");
             owner = (TerminalService) field(current, "service");
-            previous = owner.session();
+            previous = manager(owner);
             TerminalService connected = owner;
             // Display setup without changing the service's session or any installed Arch.
             runOnMainSync(() -> {
@@ -221,7 +235,7 @@ public final class TerminalInstrumentation extends Instrumentation {
             });
             if (animationsEnabled) awaitUi(() -> pulse.isRunning() && logo.getAlpha() < 0.9f, "Startup animation did not resume");
             runOnMainSync(() -> {
-                field(connected, "session", probe.session);
+                field(connected, "sessions", singleSession(probe.session));
                 field(current, "service", connected);
                 render(current);
             });
@@ -232,9 +246,9 @@ public final class TerminalInstrumentation extends Instrumentation {
         } finally {
             Activity current = activity;
             TerminalService connected = owner;
-            TerminalSession saved = previous;
+            SessionManager<TerminalSession> saved = previous;
             runOnMainSync(() -> {
-                if (connected != null) field(connected, "session", saved);
+                if (connected != null) field(connected, "sessions", saved);
                 if (current != null) {
                     field(current, "service", connected);
                     field(current, "attached", null);
@@ -249,17 +263,17 @@ public final class TerminalInstrumentation extends Instrumentation {
         Probe probe = shell("printf 'KEYBOARD_READY\\n'; exec /system/bin/sh");
         Activity activity = null;
         TerminalService owner = null;
-        TerminalSession previous = null;
+        SessionManager<TerminalSession> previous = null;
         try {
             probe.awaitText("KEYBOARD_READY");
             activity = startActivitySync(new Intent(getTargetContext(), MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
             Activity current = activity;
             awaitUi(() -> field(current, "service") != null && current.hasWindowFocus(), "Activity did not connect and gain window focus");
             owner = (TerminalService) field(current, "service");
-            previous = owner.session();
+            previous = manager(owner);
             TerminalService connected = owner;
             // Exercise the real Activity with a disposable Android shell; no Arch download is needed.
-            runOnMainSync(() -> { field(connected, "session", probe.session); render(current); });
+            runOnMainSync(() -> { field(connected, "sessions", singleSession(probe.session)); render(current); });
             TerminalView terminal = (TerminalView) field(current, "terminal");
             awaitUi(() -> terminal.isShown() && terminal.getWidth() > 0, "Terminal was not laid out");
             runOnMainSync(() -> {
@@ -292,13 +306,315 @@ public final class TerminalInstrumentation extends Instrumentation {
         } finally {
             Activity current = activity;
             TerminalService connected = owner;
-            TerminalSession saved = previous;
+            SessionManager<TerminalSession> saved = previous;
             runOnMainSync(() -> {
-                if (connected != null) { field(connected, "session", saved); render(current); }
+                if (connected != null) { field(connected, "sessions", saved); render(current); }
                 if (current != null) current.finish();
                 probe.session.finishIfRunning();
             });
         }
+    }
+    @SuppressWarnings("unchecked")
+    private static SessionManager<TerminalSession> manager(TerminalService service) {
+        return (SessionManager<TerminalSession>) field(service, "sessions");
+    }
+    private static SessionManager<TerminalSession> singleSession(TerminalSession terminal) {
+        SessionManager<TerminalSession> manager = new SessionManager<>(new SessionManager.Backend<TerminalSession>() {
+            @Override public TerminalSession create() { return terminal; }
+            @Override public boolean isRunning(TerminalSession session) { return session.isRunning(); }
+            @Override public void finish(TerminalSession session) { session.finishIfRunning(); }
+        });
+        try { manager.create(); }
+        catch (Exception error) { throw new AssertionError(error); }
+        return manager;
+    }
+    /** Use real PRoot and the service's production stop backend, including detached tracees. */
+    @SuppressWarnings("unchecked")
+    private void testSessionStopActions(boolean fromNotification) throws Exception {
+        Context context = getTargetContext();
+        AtomicReference<TerminalService> owner = new AtomicReference<>();
+        CountDownLatch connectedLatch = new CountDownLatch(1);
+        android.content.ServiceConnection connection = new android.content.ServiceConnection() {
+            @Override public void onServiceConnected(android.content.ComponentName name, android.os.IBinder binder) {
+                owner.set(((TerminalService.LocalBinder) binder).service());
+                connectedLatch.countDown();
+            }
+            @Override public void onServiceDisconnected(android.content.ComponentName name) {}
+        };
+        AtomicBoolean bound = new AtomicBoolean();
+        List<Probe> probes = new ArrayList<>();
+        Path temporary = Files.createTempDirectory(context.getCacheDir().toPath(), "stop-proot-");
+        Activity activity = null;
+        boolean savedWake = context.getSharedPreferences("terminal", Context.MODE_PRIVATE).getBoolean("wake", true);
+        try {
+            Intent serviceIntent = new Intent(context, TerminalService.class);
+            runOnMainSync(() -> {
+                context.startForegroundService(serviceIntent);
+                bound.set(context.bindService(serviceIntent, connection, Context.BIND_AUTO_CREATE));
+            });
+            if (!bound.get() || !connectedLatch.await(10, TimeUnit.SECONDS)) throw new AssertionError("Stop-test service did not bind");
+            TerminalService connected = owner.get();
+            SessionManager.Backend<TerminalSession> production = (SessionManager.Backend<TerminalSession>) field(manager(connected), "backend");
+            SessionManager<TerminalSession> isolated = new SessionManager<>(new SessionManager.Backend<TerminalSession>() {
+                @Override public TerminalSession create() {
+                    File libraries = new File(context.getApplicationInfo().nativeLibraryDir);
+                    String executable = new File(libraries, "libproot.so").getAbsolutePath();
+                    // No Arch rootfs: trace Android's own shell, including a separate process session.
+                    String command = "trap '' TERM HUP INT; "
+                        + "setsid /system/bin/sh -c 'trap \"\" TERM HUP INT; printf \"STOP_CHILD_%s_READY\\n\" \"$$\"; while :; do sleep 1; done' & "
+                        + "printf 'STOP_READY\\n'; while IFS= read -r command; do eval \"$command\"; done";
+                    Probe probe = new Probe();
+                    probe.delegate = (SessionCallbacks) field(connected, "callbacks");
+                    probe.session = new TerminalSession(executable, context.getFilesDir().getAbsolutePath(),
+                        new String[]{executable, "--kill-on-exit", "-r", "/", "/system/bin/sh", "-c", command},
+                        new String[]{"PATH=/system/bin", "TERM=xterm-256color", "PROOT_NO_SECCOMP=1",
+                            "PROOT_LOADER=" + new File(libraries, "libproot-loader.so").getAbsolutePath(), "PROOT_TMP_DIR=" + temporary}, 10000, probe);
+                    probe.session.updateSize(80, 24, 0, 0);
+                    probes.add(probe);
+                    return probe.session;
+                }
+                @Override public boolean isRunning(TerminalSession session) { return session.isRunning(); }
+                @Override public void finish(TerminalSession session) { production.finish(session); }
+            });
+            runOnMainSync(() -> {
+                if (!connected.sessions().isEmpty()) throw new AssertionError("Stop test must start before any real Arch sessions");
+                field(connected, "sessions", isolated);
+                connected.startSession();
+                connected.startSession();
+                connected.setWakeEnabled(true);
+            });
+            if (probes.size() != 2) throw new AssertionError("Real PRoot stop fixtures did not start: " + connected.status());
+            for (Probe probe : probes) {
+                probe.awaitText("STOP_READY");
+                awaitUi(() -> stopChildPid(probe) > 0, "Detached PRoot child did not start: " + probe.text);
+            }
+            activity = startActivitySync(new Intent(context, MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+            Activity current = activity;
+            awaitUi(() -> field(current, "service") == connected && current.hasWindowFocus(), "Stop-test Activity did not connect");
+            Probe first = probes.get(0), second = probes.get(1);
+            if (fromNotification) {
+                android.app.Notification notification = terminalNotification();
+                if (notification == null || notification.actions == null) throw new AssertionError("Terminal notification has no stop action");
+                android.app.PendingIntent stop = null;
+                for (android.app.Notification.Action action : notification.actions)
+                    if ("Alle beenden".contentEquals(action.title)) stop = action.actionIntent;
+                if (stop == null) throw new AssertionError("Notification stop PendingIntent is missing");
+                if (!getUiAutomation().performGlobalAction(AccessibilityService.GLOBAL_ACTION_HOME)) throw new AssertionError("Home failed before notification stop");
+                awaitUi(() -> field(current, "service") == null, "Activity did not unbind before notification stop");
+                // Send the actual notification PendingIntent while the Activity is in the background.
+                stop.send();
+                awaitStopped(first);
+                awaitStopped(second);
+                awaitUi(() -> connected.sessions().isEmpty() && terminalNotification() == null
+                    && !((android.os.PowerManager.WakeLock) field(connected, "wake")).isHeld(), "Notification stop left sessions, a notification or WakeLock");
+                stop.send();
+                waitForIdleSync();
+                if (terminalNotification() != null || !connected.sessions().isEmpty()) throw new AssertionError("Repeated notification stop resurrected the service notification");
+            } else {
+                sendKeyDownUpSync(KeyEvent.KEYCODE_VOLUME_UP);
+                clickVisibleText("Sitzung schließen");
+                clickVisibleText("Schließen");
+                awaitStopped(second);
+                awaitUi(() -> connected.sessions().size() == 1 && connected.session() == first.session, "Menu close did not select the surviving session");
+                runOnMainSync(() -> first.session.write("printf 'STILL_%s\\n' OPEN\n"));
+                first.awaitText("STILL_OPEN");
+                awaitUi(current::hasWindowFocus, "Menu close did not return focus");
+                sendKeyDownUpSync(KeyEvent.KEYCODE_VOLUME_UP);
+                clickVisibleText("Sitzung schließen");
+                clickVisibleText("Schließen");
+                awaitStopped(first);
+                awaitUi(() -> current.isFinishing() && connected.sessions().isEmpty() && terminalNotification() == null
+                    && !((android.os.PowerManager.WakeLock) field(connected, "wake")).isHeld(), "Closing the last session did not finish the Activity and remove its notification/WakeLock");
+            }
+            passed.append(fromNotification ? "Notification stop: real PendingIntent in background, both PRoot sessions and detached children reaped, notification/WakeLock removed, repeated stop\n"
+                : "Menu close: real PRoot and detached child reaped, other session stays usable, last close finishes Activity and removes notification/WakeLock\n");
+        } finally {
+            Activity current = activity;
+            runOnMainSync(() -> {
+                // Also clean up the intentionally broken SIGTERM case when running this test against 0.1.7.
+                for (Probe probe : probes) {
+                    probe.delegate = null;
+                    if (probe.session.getPid() > 0) try { android.system.Os.kill(probe.session.getPid(), android.system.OsConstants.SIGQUIT); }
+                    catch (android.system.ErrnoException ignored) {}
+                }
+                if (current != null) current.finish();
+            });
+            for (Probe probe : probes) if (!probe.finished.await(10, TimeUnit.SECONDS)) throw new AssertionError("Stop-test PRoot cleanup did not finish");
+            runOnMainSync(() -> {
+                if (owner.get() != null) { owner.get().setWakeEnabled(savedWake); owner.get().stopSelf(); }
+                if (bound.get()) context.unbindService(connection);
+            });
+            if (owner.get() != null) awaitUi(() -> (boolean) field(owner.get(), "destroyed"), "Stop-test service remained bound");
+            RootfsInstaller.deleteTree(temporary);
+        }
+    }
+    private int stopChildPid(Probe probe) {
+        java.util.regex.Matcher match = java.util.regex.Pattern.compile("STOP_CHILD_(\\d+)_READY").matcher(probe.text);
+        return match.find() ? Integer.parseInt(match.group(1)) : -1;
+    }
+    private void awaitStopped(Probe probe) throws Exception {
+        if (!probe.finished.await(10, TimeUnit.SECONDS)) throw new AssertionError("PRoot ignored the stop action; output:\n" + probe.text);
+        int child = stopChildPid(probe);
+        if (child <= 0) throw new AssertionError("Detached child PID missing");
+        awaitUi(() -> {
+            try { android.system.Os.kill(child, 0); return false; }
+            catch (android.system.ErrnoException error) { return error.errno == android.system.OsConstants.ESRCH; }
+        }, "Detached child survived PRoot cleanup: " + child);
+    }
+    private android.app.Notification terminalNotification() {
+        for (android.service.notification.StatusBarNotification notification : getTargetContext().getSystemService(android.app.NotificationManager.class).getActiveNotifications())
+            if (notification.getId() == 1) return notification.getNotification();
+        return null;
+    }
+    private void testMultipleSessions() throws Exception {
+        Activity activity = null;
+        TerminalService owner = null;
+        SessionManager<TerminalSession> previous = null;
+        List<Probe> probes = new ArrayList<>();
+        boolean previousWake = true;
+        try {
+            Intent intent = new Intent(getTargetContext(), MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            activity = startActivitySync(intent);
+            Activity current = activity;
+            awaitUi(() -> field(current, "service") != null && current.hasWindowFocus(), "Multi-session Activity did not connect");
+            owner = (TerminalService) field(current, "service");
+            TerminalService connected = owner;
+            previous = manager(connected);
+            previousWake = connected.wakeEnabled();
+            SessionManager<TerminalSession> isolated = new SessionManager<>(new SessionManager.Backend<TerminalSession>() {
+                @Override public TerminalSession create() {
+                    Probe probe = new Probe();
+                    probe.delegate = (SessionCallbacks) field(connected, "callbacks");
+                    probe.session = new TerminalSession("/system/bin/sh", getTargetContext().getFilesDir().getAbsolutePath(),
+                        new String[]{"sh", "-c", "trap 'exit 0' TERM; printf 'MULTI_READY\\n'; while IFS= read -r command; do eval \"$command\"; done"},
+                        new String[]{"PATH=/system/bin", "TERM=xterm-256color"}, 10000, probe);
+                    probe.session.updateSize(80, 24, 0, 0);
+                    probes.add(probe);
+                    return probe.session;
+                }
+                @Override public boolean isRunning(TerminalSession session) { return session.isRunning(); }
+                @Override public void finish(TerminalSession session) { session.finishIfRunning(); }
+            });
+            runOnMainSync(() -> {
+                field(connected, "sessions", isolated);
+                connected.startSession();
+                connected.setWakeEnabled(true);
+                render(current);
+            });
+            Probe first = probes.get(0);
+            first.awaitText("MULTI_READY");
+            TerminalView terminal = (TerminalView) field(current, "terminal");
+            SessionBar bar = (SessionBar) field(current, "sessionBar");
+            android.widget.LinearLayout tabs = (android.widget.LinearLayout) field(bar, "tabs");
+            awaitUi(() -> terminal.isShown() && terminal.getWidth() > 0 && field(terminal, "mEmulator") != null
+                && bar.isShown() && bar.getWidth() > 0, "First terminal was not laid out before input");
+            runOnMainSync(() -> first.session.write("value=FIRST; printf 'PRIVATE_%s\\n' \"$value\"\n"));
+            tap((View) field(bar, "add"));
+            awaitUi(() -> probes.size() == 2 && field(current, "attached") == probes.get(1).session
+                && field(terminal, "mEmulator") == probes.get(1).session.getEmulator(), "Plus did not attach and lay out the second terminal");
+            Probe second = probes.get(1);
+            second.awaitText("MULTI_READY");
+            first.awaitText("PRIVATE_FIRST");
+            runOnMainSync(() -> {
+                InputConnection input = terminal.onCreateInputConnection(new EditorInfo());
+                if (input == null || !input.commitText("value=SECOND; printf 'PRIVATE_%s\\n' \"$value\"\n", 1))
+                    throw new AssertionError("Second terminal did not accept IME input");
+            });
+            second.awaitText("PRIVATE_SECOND");
+            runOnMainSync(() -> {
+                if (first.text.contains("PRIVATE_SECOND") || second.text.contains("PRIVATE_FIRST"))
+                    throw new AssertionError("Session input/output leaked across terminals");
+                ((View) field(current, "control")).performClick();
+                tabs.getChildAt(0).performClick();
+                if (field(current, "attached") != first.session || !terminal.hasFocus() || (boolean) field(current, "ctrl"))
+                    throw new AssertionError("Selecting a tab lost its shell/focus or carried CTRL into another session");
+                tabs.getChildAt(1).performClick();
+                if (field(current, "attached") != second.session || tabs.getChildCount() != 2)
+                    throw new AssertionError("Session tabs did not switch back to the same PTY");
+                ((View) field(current, "keys")).setVisibility(View.GONE);
+                if (!bar.isShown()) throw new AssertionError("Session navigation depends on extra keys");
+            });
+            if (!getUiAutomation().performGlobalAction(AccessibilityService.GLOBAL_ACTION_HOME))
+                throw new AssertionError("Android did not accept Home during multi-session test");
+            awaitUi(() -> field(current, "service") == null, "Activity did not unbind in background");
+            runOnMainSync(() -> first.session.write("printf 'BACKGROUND_%s\\n' 'OK'\n"));
+            first.awaitText("BACKGROUND_OK");
+            getTargetContext().startActivity(intent);
+            awaitUi(() -> field(current, "service") == connected && current.hasWindowFocus()
+                && field(current, "attached") == second.session, "Rebinding lost the selected terminal");
+            awaitUi(current::hasWindowFocus, "Activity did not regain focus before creating a session from the menu");
+            sendKeyDownUpSync(KeyEvent.KEYCODE_VOLUME_UP);
+            clickVisibleText("Neue Sitzung");
+            awaitUi(() -> probes.size() == 3, "Session menu did not create another PTY");
+            runOnMainSync(() -> {
+                connected.selectSession(isolated.entries().get(1));
+                tabs.getChildAt(1).performLongClick();
+            });
+            clickVisibleText("Schließen");
+            if (!second.finished.await(10, TimeUnit.SECONDS)) throw new AssertionError("Closing one tab did not finish its PTY");
+            Probe third = probes.get(2);
+            third.awaitText("MULTI_READY");
+            awaitUi(() -> connected.sessions().size() == 2 && connected.session() == third.session, "Closed tab did not select its neighbor");
+            runOnMainSync(() -> {
+                if (!first.session.isRunning() || !third.session.isRunning()
+                    || !((android.os.PowerManager.WakeLock) field(connected, "wake")).isHeld())
+                    throw new AssertionError("Closing one terminal stopped another session or released its WakeLock");
+                first.session.write("exit 7\n");
+            });
+            if (!first.finished.await(10, TimeUnit.SECONDS) || first.exit != 7)
+                throw new AssertionError("Background shell did not report its own exit status");
+            awaitUi(() -> connected.session() == third.session && isolated.runningCount() == 1, "Background exit changed the active shell");
+            runOnMainSync(() -> {
+                if (!((android.os.PowerManager.WakeLock) field(connected, "wake")).isHeld())
+                    throw new AssertionError("Background exit released a running terminal's WakeLock");
+                tabs.getChildAt(0).performClick();
+                if (field(current, "attached") != first.session || !terminal.getCurrentSession().getEmulator().getScreen().getTranscriptText().contains("PRIVATE_FIRST"))
+                    throw new AssertionError("Exited terminal lost its scrollback");
+            });
+            sendKeyDownUpSync(KeyEvent.KEYCODE_ENTER);
+            awaitUi(() -> probes.size() == 4 && connected.selectedSession().number == 1
+                && connected.sessions().size() == 2 && third.session.isRunning(), "Enter did not restart only the ended tab");
+            Probe restarted = probes.get(3);
+            restarted.awaitText("MULTI_READY");
+            runOnMainSync(() -> connected.closeSession(isolated.selected()));
+            if (!restarted.finished.await(10, TimeUnit.SECONDS)) throw new AssertionError("Restarted PTY did not close");
+            awaitUi(() -> connected.session() == third.session && !connected.stopping(), "Closing the restarted tab stopped another shell");
+            runOnMainSync(isolated::closeAll);
+            if (!third.finished.await(10, TimeUnit.SECONDS)) throw new AssertionError("Final test PTY did not close");
+            awaitUi(() -> isolated.isEmpty() && !((android.os.PowerManager.WakeLock) field(connected, "wake")).isHeld(),
+                "Final PTY exit left a session or WakeLock behind");
+            passed.append("Multiple terminals: plus/menu creation, independent IME/shell state and scrollback, tab selection/focus, background/rebind, close isolation, background exit, Enter restart, WakeLock lifetime\n");
+        } finally {
+            Activity current = activity;
+            TerminalService connected = owner;
+            SessionManager<TerminalSession> saved = previous;
+            boolean savedWake = previousWake;
+            runOnMainSync(() -> {
+                for (Probe probe : probes) { probe.delegate = null; probe.session.finishIfRunning(); }
+                if (connected != null && saved != null) {
+                    field(connected, "sessions", saved);
+                    connected.setWakeEnabled(savedWake);
+                }
+                if (current != null) { if (connected != null) render(current); current.finish(); }
+            });
+        }
+    }
+    private void clickVisibleText(String text) throws Exception {
+        long deadline = SystemClock.elapsedRealtime() + 10000;
+        while (SystemClock.elapsedRealtime() < deadline) {
+            AccessibilityNodeInfo root = getUiAutomation().getRootInActiveWindow();
+            if (root != null) {
+                List<AccessibilityNodeInfo> items = root.findAccessibilityNodeInfosByText(text);
+                if (!items.isEmpty()) {
+                    Rect bounds = new Rect();
+                    items.get(0).getBoundsInScreen(bounds);
+                    tap(bounds.centerX(), bounds.centerY());
+                    return;
+                }
+            }
+            Thread.sleep(20);
+        }
+        throw new AssertionError("Dialog item was not available: " + text);
     }
     private void testSetupActions(Activity activity) {
         AtomicReference<Throwable> failure = new AtomicReference<>();

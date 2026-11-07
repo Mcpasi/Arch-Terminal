@@ -1,12 +1,14 @@
 # Offene Arbeiten und Geräteabnahme
 
-Stand: Version 0.1.6, 7. November 2026.
+Stand: Version 0.1.8, 7. November 2026.
 
 ## Vor einer belastbaren Smartphone-Freigabe
 
 Der erste Nutzer-Gerätetest mit 0.1.0 konnte Arch herunterladen, scheiterte beim Entpacken an der auf Android verbotenen Hardlink-Erstellung. Seit 0.1.1 werden dafür Dateikopien verwendet. Für 0.1.2 wurde der Tastaturfehler im Android-11-Emulator (AOSP x86_64) reproduziert und durch Aktivieren des Terminal-Touch-Fokus korrigiert. Der Emulator verwendet die echte Activity und JNI-PTY mit einer Android-Shell. Der komplette **ARM64-/PRoot-/Arch-Ablauf auf einem Smartphone ist weiterhin nicht abgenommen**.
 
-Der Arch-Ablauf wurde auf Version 0.1.6 erfolgreich getestet, verifieziert auf einen Redmi Note 14 und einen Redmi 14C. 
+Der Arch-Ablauf wurde auf Version 0.1.6 erfolgreich getestet, verifiziert auf einem Redmi Note 14 und einem Redmi 14C.
+
+Für 0.1.7 zusätzlich mehrere parallele Arch-/PRoot-Sitzungen auf diesen Geräten prüfen: getrennte Shellzustände und Ausgabe, Wechsel während laufender Befehle, gezieltes Schließen, gemeinsames Beenden, Hintergrund/Rückkehr und Wachhaltung bis zum letzten Prozess. Die Android-Regressionen verwenden dafür temporäre Android-Shells; die Geräteabnahme mit mehreren Arch-Sitzungen bleibt separat.
 
 - `scripts/test-device.sh` auf ARM64 Android ausführen; danach Arch in der App installieren und `scripts/test-device.sh --rootfs` ausführen.
 - Android 9/10, 13 sowie 15/16 prüfen, jeweils soweit Geräte verfügbar sind. Mindestens ein Gerät mit 16-KiB-Speicherseiten testen.
@@ -16,7 +18,7 @@ Der Arch-Ablauf wurde auf Version 0.1.6 erfolgreich getestet, verifieziert auf e
 - pacman-Schlüsselinitialisierung beim ersten Login, `pacman -Syu` und Paketinstallation auf dem Android-Kernel durchführen. Signierte Installationen von `git`, `mc`, `nodejs`, `npm` und `tree` wurden unter PRoot/QEMU geprüft; Node.js, npm und Midnight Commander starten dort. Git wurde gemäß Vorgabe nicht aufgerufen.
 - Vollbild, Displayausschnitte, Gestennavigation, Gboard/Samsung-Tastatur, Querformat, Größenänderung während Vim/less und Copy/Paste auf Smartphones prüfen. Der neue Tastaturtest deckt Android 11 mit AOSP-Tastatur im x86_64-Emulator ab; andere Android-Versionen und Hersteller-Tastaturen bleiben offen.
 - Mindestens acht Stunden mit stillem Befehl, großer Ausgabe, Display aus/an und wiederholtem Appwechsel laufen lassen. Android-Phantomprozessregeln und herstellerspezifische Energiesparfunktionen können trotz Vordergrunddienst und WakeLock Prozesse beenden.
-- Explizites Beenden mit normalen, im Hintergrund laufenden und per `setsid` abgekoppelten Guest-Prozessen prüfen; keine verbliebenen Prozesse oder WakeLocks. PRoot-SIGTERM-Aufräumlogik ist angebunden, das Verhalten auf Android muss bestätigt werden.
+- Explizites Beenden mit normalen, im Hintergrund laufenden und per `setsid` abgekoppelten Guest-Prozessen prüfen; keine verbliebenen Prozesse oder WakeLocks. Seit 0.1.8 verwendet die App PRoots SIGQUIT-Aufräumlogik. Das Beenden per Menü und Benachrichtigung einschließlich abgekoppelter Kinder ist mit echtem PRoot im Android-11-Emulator bestanden; auf den ARM64-Herstellergeräten erneut prüfen.
 
 ## Distribution und Reproduzierbarkeit
 

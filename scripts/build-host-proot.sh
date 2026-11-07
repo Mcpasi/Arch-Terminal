@@ -12,7 +12,7 @@ if [ ! -d .build/proot-host ]; then
   cp -a .build/sources/proot .build/proot-host
   make -C .build/proot-host/src clean HAS_LOADER_32BIT= >.cache/proot-host-clean.log 2>&1
 fi
-make -C .build/proot-host/src -j"${ARCH_BUILD_JOBS:-4}" HAS_LOADER_32BIT= PROOT_UNBUNDLE_LOADER=/unused \
+make -C .build/proot-host/src -j"${ARCH_BUILD_JOBS:-1}" HAS_LOADER_32BIT= PROOT_UNBUNDLE_LOADER=/unused \
   LD="cc -B$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin -fuse-ld=lld" \
   CPPFLAGS="-D_FILE_OFFSET_BITS=64 -D_GNU_SOURCE -DARG_MAX=131072 -include $project/scripts/proot-compat.h -I. -I$project/.build/sources/talloc" \
   LDFLAGS="-L$project/.build/host-deps/talloc -ltalloc -Wl,-z,noexecstack"

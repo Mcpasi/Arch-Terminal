@@ -2,7 +2,11 @@
 
 Native Android-Konsole für **Arch Linux ARM aarch64**, mit C++-PTY, PRoot und pacman. Android ab 9 / API 28, ausschließlich `arm64-v8a`. Keine Termux-Installation und keine Rootrechte erforderlich.
 
-Die App zeigt eine echte VT-Konsole im Vollbild: ANSI/Truecolor, UTF-8, Cursorsteuerung, alternativer Bildschirm, Scrollback, Touch-Auswahl, Tastatur und Größenänderung der PTY. Die Zusatztasten können ausgeblendet werden. Die Sitzung gehört einem Vordergrunddienst und bleibt beim Wechsel in andere Apps oder bei ausgeschaltetem Display bestehen, solange Android den Prozess laufen lässt.
+Die App zeigt echte VT-Konsolen im Vollbild: ANSI/Truecolor, UTF-8, Cursorsteuerung, alternativer Bildschirm, Scrollback, Touch-Auswahl, Tastatur und Größenänderung der PTY. Die Zusatztasten können ausgeblendet werden. Die Sitzungen gehören einem Vordergrunddienst und bleiben beim Wechsel in andere Apps oder bei ausgeschaltetem Display bestehen, solange Android den Prozess laufen lässt.
+
+0.1.8 behebt das Beenden über das Drei-Punkte-Menü und die Android-Benachrichtigung. Die zugehörigen Arch-Prozesse einschließlich abgekoppelter Jobs werden beendet; nach der letzten Sitzung verschwinden Benachrichtigung und CPU-Wachhaltung.
+
+Seit 0.1.7 können mehrere Terminals gleichzeitig laufen. **+** in der oberen Sitzungsleiste oder **Neue Sitzung** im Menü öffnet eine weitere Shell. Die Tabs wechseln zwischen den Sitzungen mit jeweils eigenem Prozess, Arbeitsverzeichnis, Shellzustand und Scrollback; alle verwenden dieselbe Arch-Installation. Langes Drücken auf einen Tab oder **Sitzung schließen** im Menü schließt nach Bestätigung nur diese Sitzung. **Alle Sitzungen beenden** und die Aktion in der Android-Benachrichtigung beenden sämtliche Sitzungen. Beendete Shells behalten ihre Ausgabe; Enter startet nur ihren Tab neu.
 
 Seit 0.1.5 zeigt die Start-/Installationsansicht ein kleines pulsierendes Arch-Linux-Logo. Sobald eine Sitzung angezeigt wird, verschwindet es ohne zusätzliche Wartezeit. Die Animation pausiert im Hintergrund und beachtet deaktivierte Android-Animationen; die Befehlseingabe erhält die volle Terminalfläche.
 
@@ -22,13 +26,13 @@ scripts/build.sh
 
 SDK 36, Build Tools 35.0.0, NDK r28c (`28.2.13676358`), Gradle 8.14.3 und AGP 8.11.0 sind festgelegt. `scripts/android-env.sh` findet auch den vorhandenen Buildozer-Cache. PRoot, talloc und libarchive werden mit SHA-256 geprüft und aus Quellen gebaut. Der Gradle-Wrapper prüft seinen Download ebenfalls.
 
-Gradle läuft standardmäßig ohne dauerhaften Daemon, mit maximal 1 GiB Java-Heap und zwei Workern; parallele Projekt-Builds sind deaktiviert. Gradle und Android-Emulator auf Rechnern mit wenig RAM nacheinander ausführen.
+Gradle läuft standardmäßig ohne dauerhaften Daemon, mit maximal 1 GiB Java-Heap, einem Worker, einem sichtbaren JVM-Prozessor und serieller Garbage Collection; parallele Projekt-Builds und Test-Forks sind deaktiviert. Native Builds verwenden standardmäßig ebenfalls einen Worker (`ARCH_BUILD_JOBS=1`), CTest läuft seriell. Für eine zusätzliche Begrenzung auf einen verfügbaren CPU-Kern können die Skripte unter Linux mit `taskset -c <Kern>` gestartet werden. Gradle und Android-Emulator auf Rechnern mit wenig RAM nacheinander ausführen; der Emulator verwendet für ressourcenschonende Tests `-cores 1` und Softwaregrafik bei deaktiviertem Vulkan.
 
 `gradle/verification-metadata.xml` prüft die verwendeten Maven-Artefakte. Bei einem bewussten Dependency-Update die neuen Prüfsummen gegen die jeweiligen Quellen prüfen und die Metadaten zusammen mit der Versionsänderung aktualisieren.
 
 Ergebnisse:
 
-- `output/ArchTerminal-0.1.6-arm64-debug.apk` – installierbare, mit dem lokalen Android-Debugschlüssel signierte App.
+- `output/ArchTerminal-0.1.8-arm64-debug.apk` – installierbare, mit dem lokalen Android-Debugschlüssel signierte App.
 - `output/ArchTerminal-tests.apk` – eigener Android-Instrumentationstest.
 - `output/SHA256SUMS` – Prüfsummen der APKs.
 - `scripts/source-bundle.sh` – App-Quellen und exakte native Quellarchive zur Weitergabe mit einer APK.
@@ -38,7 +42,7 @@ Die CI in `.github/workflows/build.yml` führt Hosttests, Java-Tests, Lint, Buil
 ## Auf dem Smartphone
 
 ```bash
-adb install -r output/ArchTerminal-0.1.6-arm64-debug.apk
+adb install -r output/ArchTerminal-0.1.8-arm64-debug.apk
 ```
 
 App öffnen und **Arch installieren / fortsetzen** wählen. Der erste Download umfasst ungefähr 791 MiB; mindestens 5 GiB freien internen Speicher vorsehen. Das Arch-Archiv wird gegen den gepinnten SHA-256 geprüft, zunächst in ein separates Verzeichnis entpackt und erst nach vollständiger Konfiguration aktiviert. Unterbrochene Downloads lassen sich fortsetzen. Ein fehlgeschlagener Installationsversuch überschreibt kein vorhandenes Arch.
@@ -63,8 +67,9 @@ Die Daten liegen privat unter `files/arch` der App. Eine Deinstallation entfernt
 - Tippen öffnet die Bildschirmtastatur; lange drücken markiert Text zum Kopieren/Einfügen.
 - ESC, TAB, CTRL, ALT und Pfeile stehen in der unteren Leiste bereit. CTRL/ALT werden durch erneutes Antippen ausgeschaltet.
 - **Lautstärke leiser gedrückt halten** wirkt als CTRL. **Lautstärke lauter** öffnet das Menü, auch bei ausgeblendeter Leiste.
-- Im Menü: Tastatur, Ctrl-C, Schriftgröße, Zusatztasten, CPU-Wachhaltung, PRoot-Kompatibilität, Lizenzen und Beenden.
-- `exit` beendet die Shell. Enter startet anschließend eine neue Sitzung.
+- Die obere Leiste bleibt auch bei ausgeblendeten Zusatztasten sichtbar; **+** öffnet eine weitere Sitzung, Antippen eines Tabs wechselt die Konsole.
+- Im Menü: neue Sitzung, einzelne Sitzung schließen, alle Sitzungen beenden, Tastatur, Ctrl-C, Schriftgröße, Zusatztasten, CPU-Wachhaltung, PRoot-Kompatibilität und Lizenzen.
+- `exit` beendet ausschließlich die jeweilige Shell. Enter startet ihren Tab neu; die anderen Sitzungen laufen weiter.
 - Der Kompatibilitätsmodus setzt für die nächste Sitzung `PROOT_NO_SECCOMP=1`.
 - Androids Meldung über das ältere Target ist wegen Target 28 zu erwarten.
 

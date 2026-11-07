@@ -3,7 +3,8 @@
 ```text
 MainActivity / Termux TerminalView
   ↕ VT-Emulator, InputQueue, ByteQueue
-TerminalService / TerminalSession (Java, Hauptthread und I/O-Threads)
+TerminalService / SessionManager / mehrere TerminalSession-Instanzen
+  (Java, Hauptthread und I/O-Threads je PTY)
   ↕ JNI
 C++ PTY: /dev/ptmx → fork → setsid → TIOCSCTTY → execve
   ↕ controlling terminal / SIGWINCH
@@ -30,7 +31,7 @@ Das 48-dp-Arch-Logo ist eine dekorative `ImageView` neben dem Titel der Start-/I
 
 PRoot und sein Loader liegen im extrahierten nativen APK-Verzeichnis. `LaunchSpec` übergibt Argumente als Array, ohne Shellquoting. Das Guest-Dateisystem ist `files/arch`; `/dev`, `/proc` und `/sys` werden gebunden. `/dev/shm` wird auf ein privates, beschreibbares Verzeichnis abgebildet. DNS-Server stammen nach Möglichkeit aus Androids aktivem Netzwerk; ohne diese Daten werden 1.1.1.1 und 9.9.9.9 verwendet. Die DNS-Datei wird beim Sitzungsstart erzeugt.
 
-`PROOT_LOADER` und `PROOT_TMP_DIR` verweisen auf app-eigene Pfade. `LD_PRELOAD` und `LD_LIBRARY_PATH` des Android-Hosts werden nicht an Arch weitergereicht. `/usr/bin/env -i` setzt für den Guest HOME, PATH, TERM, Locale und weitere Shell-Grundwerte. `--kill-on-exit` räumt Guest-Prozesse beim Shellende auf. Explizites Beenden sendet SIGTERM an den Tracer, damit PRoots eigene Aufräumroutine auch abgekoppelte Prozesse erreichen kann. Das muss zusätzlich auf Android-Herstellerkerneln geprüft werden.
+`PROOT_LOADER` und `PROOT_TMP_DIR` verweisen auf app-eigene Pfade. `LD_PRELOAD` und `LD_LIBRARY_PATH` des Android-Hosts werden nicht an Arch weitergereicht. `/usr/bin/env -i` setzt für den Guest HOME, PATH, TERM, Locale und weitere Shell-Grundwerte. `--kill-on-exit` räumt Guest-Prozesse beim Shellende auf. Explizites Beenden sendet seit 0.1.8 SIGQUIT an den Tracer. Der gepinnte PRoot ignoriert SIGTERM; nur sein SIGQUIT-Pfad ruft die Bereinigung aller Tracees auf und lässt die Ereignisschleife deren Ende abwarten. Damit werden auch abgekoppelte Prozesse erfasst. Die generische Terminalbibliothek bietet dafür ein vom Prozessbesitzer wählbares Signal; gewöhnliche Shell-Tests behalten ihren bisherigen SIGTERM-Standard. Das muss zusätzlich auf Android-Herstellerkerneln geprüft werden.
 
 PRoot ist eine Übersetzungsschicht ohne Rootrechte und ohne eigenen Kernel. systemd als PID 1, echte Mounts, Kernelmodule und echte Linux-Capabilities sind damit nicht verfügbar. Guest-Root entspricht weiterhin der Android-App-UID. PRoot ist keine zusätzliche Sicherheitsgrenze gegenüber Programmen, die der Benutzer in dieser App startet.
 
@@ -58,4 +59,14 @@ Download und Entpacken sind abbrechbar. Der Entpacker prüft ein atomares Abbruc
 
 ## Lebenszyklus
 
-Die Activity bindet den Dienst und hält keine Prozesshoheit. Rotation wird durch Konfigurationsbehandlung und PTY-Resize verarbeitet; Activity-Neuanbindung verwendet dieselbe Session. Bildschirm- oder Appwechsel beendet die Session nicht. Der gestartete Vordergrunddienst hält während Installation/Sitzung optional einen CPU-WakeLock ohne Ablaufzeit. Bei beendetem Prozess oder zerstörtem Dienst wird er freigegeben. Der Dienst ist nicht exportiert. Nach einer tatsächlichen Android-Prozessbeendigung wird keine laufende Shell vorgetäuscht oder ein Benutzerbefehl automatisch wiederholt.
+Die Activity bindet den Dienst und hält keine Prozesshoheit. Rotation wird durch Konfigurationsbehandlung und PTY-Resize verarbeitet; Activity-Neuanbindung verwendet dieselben Sitzungen und dieselbe Auswahl. Jede Activity meldet ausschließlich ihren eigenen Listener ab, damit ein später `onStop()`-Aufruf keine bereits neu verbundene Activity abmeldet. Bildschirm- oder Appwechsel beendet keine Sitzung. Der gestartete Vordergrunddienst hält während Installation oder mindestens einer laufenden Sitzung optional einen CPU-WakeLock ohne Ablaufzeit. Er wird erst nach Ende der letzten laufenden Sitzung oder bei zerstörtem Dienst freigegeben. Der Dienst ist nicht exportiert. Nach einer tatsächlichen Android-Prozessbeendigung wird keine laufende Shell vorgetäuscht oder ein Benutzerbefehl automatisch wiederholt.
+
+## Mehrere Sitzungen
+
+`SessionManager<T>` verwaltet seit 0.1.7 auf dem Hauptthread eine geordnete Liste mit stabilen Terminalnummern und der ausgewählten Sitzung. Sein Backend kapselt Erzeugung, Laufzustand und Beenden; dadurch lassen sich Auswahl und Lebenszyklus ohne Android oder JNI prüfen. Ein neuer PTY wird vor der Änderung der Liste erzeugt. Scheitert sein Start, bleiben vorhandene Terminals und Auswahl erhalten. Der Neustart eines beendeten Tabs ersetzt nur dessen Terminal unter derselben Nummer und Listenposition; verspätete Callbacks des alten Terminals werden anhand seiner Identität verworfen.
+
+Jede `TerminalSession` besitzt einen eigenen PTY-Prozess, VT-Emulator, Scrollback und getrennte I/O-Queues/Threads. Die Arch-Installation einschließlich Dateien und Paketdatenbank ist gemeinsam. `TerminalService` hält sämtliche Sessions; nur die ausgewählte Sitzung ist an den einzelnen `TerminalView` gebunden. Hintergrundausgabe wird weiterhin in ihrem eigenen Emulator verarbeitet, löst aber keine unnötige Neuzeichnung der sichtbaren Konsole aus. Beim Wechsel setzt die Activity eingerastete CTRL-/ALT-Zustände zurück und fokussiert die Konsole.
+
+`SessionBar` kapselt die horizontale Tabnavigation und die ständig erreichbare Plus-Aktion. Die Tabs zeigen Terminalnummer, gegebenenfalls Shelltitel sowie den Ende-/Schließzustand. Ihre Views werden nur bei geänderter Sitzungsliste neu aufgebaut. Die Leiste bleibt unabhängig von den optionalen Zusatztasten verfügbar. Einzelnes Schließen erfordert eine Bestätigung und beendet ausschließlich den zugehörigen Prozess. Ein schließender PTY bleibt bis zum Exit-Callback mit vollständigem Ausgabedrain verwaltet; danach wird bei Bedarf ein benachbarter Tab ausgewählt. Natürlich beendete Sitzungen behalten ihren Scrollback bis zum Schließen oder Neustart. Gemeinsames Beenden und Dienstzerstörung schließen auch die Hintergrundsitzungen.
+
+Beim expliziten Beenden der letzten Sitzung entfernt der Dienst die Vordergrundbenachrichtigung unmittelbar und gibt den WakeLock frei, auch wenn eine Activity oder ein Testclient noch gebunden ist. Während dieses abgeschlossenen Stop-Zustands publiziert er keine neue Benachrichtigung. Die Activity kann anschließend fertig schließen und ihre Bindung lösen; der Dienst stoppt ohne Sitzungsneustart.

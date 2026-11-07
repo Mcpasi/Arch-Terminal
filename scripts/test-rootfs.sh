@@ -7,7 +7,7 @@ python3 scripts/verify-rootfs.py --download
 python3 scripts/fetch-sources.py
 cmake -S . -B .build/host -DCMAKE_BUILD_TYPE=Debug \
   -DCMAKE_POLICY_VERSION_MINIMUM=3.5 -DLIBARCHIVE_SOURCE="$project/.build/sources/libarchive"
-cmake --build .build/host -j"${ARCH_BUILD_JOBS:-4}"
+cmake --build .build/host -j"${ARCH_BUILD_JOBS:-1}"
 if [ ! -f "$test_root/usr/bin/pacman" ]; then
   mkdir -p "$test_root"
   (umask 0077; .build/host/extract_test --deny-hardlinks .cache/rootfs/ArchLinuxARM-aarch64-latest.tar.gz "$test_root")

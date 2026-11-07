@@ -68,6 +68,27 @@ int main() {
         read_until(interrupt.master, "INTERRUPTED");
         finish(interrupt, 0);
 
+        // Simultaneous sessions must own separate PTYs, geometry and inherited descriptors.
+        auto first = shell("stty -echo; printf FIRST_READY; read value; stty size; printf 'FIRST_<%s>_DONE' \"$value\"; exit 3");
+        auto second = shell("stty -echo; printf SECOND_READY; read value; stty size; printf 'SECOND_<%s>_DONE' \"$value\"; read value; printf SECOND_ALIVE; exit 4");
+        require(first.pid != second.pid && first.master != second.master, "sessions share a process or PTY");
+        read_until(first.master, "FIRST_READY");
+        read_until(second.master, "SECOND_READY");
+        archterminal::resize(first.master, 31, 91, 9, 18);
+        require(write(first.master, "alpha\n", 6) == 6, "first session write failed");
+        auto first_output = read_until(first.master, "_DONE");
+        require(first_output.find("31 91") != std::string::npos && first_output.find("FIRST_<alpha>_DONE") != std::string::npos,
+                "first session lost its geometry or input");
+        finish(first, 3);
+        require(waitpid(second.pid, &status, WNOHANG) == 0, "closing first session ended second session");
+        require(write(second.master, "beta\n", 5) == 5, "second session write failed");
+        auto second_output = read_until(second.master, "_DONE");
+        require(second_output.find("24 80") != std::string::npos && second_output.find("SECOND_<beta>_DONE") != std::string::npos
+                && second_output.find("alpha") == std::string::npos, "session geometry or input leaked across PTYs");
+        require(write(second.master, "\n", 1) == 1, "remaining session write failed");
+        read_until(second.master, "SECOND_ALIVE");
+        finish(second, 4);
+
         // Drain substantially more than a display buffer; output volume never kills the PTY.
         auto burst = shell("head -c 33554432 /dev/zero; printf BURST_DONE");
         size_t received = 0;
@@ -101,7 +122,7 @@ int main() {
         auto after_failure = shell("printf RECOVERED");
         read_until(after_failure.master, "RECOVERED");
         finish(after_failure, 0);
-        std::cout << "PTY: controlling terminal, UTF-8, geometry, resize, idle, Ctrl-C, 32 MiB stream, signals, exec recovery passed\n";
+        std::cout << "PTY: controlling terminal, UTF-8, geometry, resize, idle, Ctrl-C, independent concurrent sessions, 32 MiB stream, signals, exec recovery passed\n";
         return 0;
     } catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 1; }
 }

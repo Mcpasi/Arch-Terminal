@@ -1,6 +1,6 @@
 # Testkonzept und Stand
 
-Stand: Version 0.1.6, 7. November 2026. Die Host-Prüfungen liefen auf Linux x86_64 mit JDK 17, Android SDK 36 und NDK r28c. Ein Android-11-Emulator (API 30, AOSP x86_64) dient den Start-/JNI- und Tastaturregressionen. Diese Prüfungen ersetzen keine ARM64-/PRoot-Geräteabnahme.
+Stand: Version 0.1.8, 7. November 2026. Die Host-Prüfungen liefen auf Linux x86_64 mit JDK 17, Android SDK 36 und NDK r28c. Ein Android-11-Emulator (API 30, AOSP x86_64) dient den Start-/JNI-, Tastatur- und Mehrsitzungsregressionen. Diese Prüfungen ersetzen keine ARM64-/PRoot-Geräteabnahme.
 
 ## Wiederholbare Suite
 
@@ -8,17 +8,43 @@ Stand: Version 0.1.6, 7. November 2026. Die Host-Prüfungen liefen auf Linux x86
 
 | Bereich | Prüfung |
 | --- | --- |
-| Native PTY, CTest | stdin/stdout/stderr sind TTYs; controlling terminal; Anfangsgröße; UTF-8-Eingabe; Resize; stille, weiterhin bedienbare Shell; Ctrl-C; 32 MiB Ausgabe; SIGKILL/Exitcodes; fehlgeschlagenes exec/chdir und anschließender erfolgreicher Neustart |
+| Native PTY, CTest | stdin/stdout/stderr sind TTYs; controlling terminal; Anfangsgröße; UTF-8-Eingabe; Resize; gleichzeitige PTYs mit getrennter Ein-/Ausgabe und Geometrie sowie Weiterlaufen nach dem Schließen der anderen Sitzung; stille, weiterhin bedienbare Shell; Ctrl-C; 32 MiB Ausgabe; SIGKILL/Exitcodes; fehlgeschlagenes exec/chdir und anschließender erfolgreicher Neustart |
 | Nativer Entpacker, CTest | Gzip/Tar; ausführbare Dateien; Verzeichnismodi bei umask 0077 einschließlich privater/schreibgeschützter Verzeichnisse, Sticky-/Setgid-Bits und später Elterneinträge; sichere/idempotente mtree-Bestandsreparatur samt Konflikten und maskierten Pfadnamen; relative und absolute Guest-Symlinks; Hardlink-Dateikopien samt Vorwärtsreferenzen/Ketten; Geräte überspringen; `..`/absolute Dateipfade ablehnen; Symlink-Ausbruch; fehlende/zyklische Hardlink-Ziele; doppelte Dateien; Abbruchsignal |
 | Android-Hardlink-Sperre, CTest | gleiche Entpacktests mit `link` und `linkat` durch seccomp auf EACCES gesperrt; normaler Probe-Hardlink muss tatsächlich scheitern |
 | App-Java, JUnit | Argumente mit Leerzeichen; separate Host-/Guest-Umgebung; expliziter seccomp-Kompatibilitätsmodus; pacman-Signaturpflicht und Konfiguration; unvollständiges Rootfs ablehnen; einmaliger Mirror-/Rechte-Upgrade mit Erhalt eigener Mirrorlisten/Shellprofile und Wiederaufnahme nach Fehlern; schreibgeschütztes Staging ohne Symlink-Folgen aufräumen |
 | Download-Java, JUnit | echte lokale HTTP-Verbindungen: Range-Fortsetzung, ignorierte Range mit sauberem Neustart, Verbindungsabbruch und Wiederaufnahme, falsche Content-Range, Abbruch mit erhaltenem Teilarchiv |
+| Sitzungsverwaltung, JUnit | unabhängiger Shellzustand und Auswahl; Start-/Neustartfehler; stabile Terminalnummern; gezieltes Schließen und benachbarte Auswahl; Hintergrundende mit erhaltenem Transcript; Neustart nur des beendeten Tabs; verspätete Callbacks; unveränderliche Listensnapshots; gemeinsame Bereinigung |
 | Eingabequeue, JUnit | kopierte Eingabedaten und FIFO; voller Puffer blockiert/beendet die Sitzung nicht; Writer wird beim Schließen geweckt |
 | Upstream-Emulator, JUnit | vorhandene VT-/Unicode-/Cursor-/Farb-/Scroll-/Escape-Sequenz-Regressionssuite |
 | Python | gepinnte native Inputs, Rootfs-Architektur/Schlüssel/Hash und Gradle-Prüfsumme |
 | Android Lint | API-Verwendung, Ressourcen und App-Code |
 
-Die Java-Suite enthält 166 Tests (145 ursprüngliche Emulator-Tests und 21 zusätzliche Tests); dazu kommen 3 Python-Tests und 3 CTest-Läufe mit zwei Testprogrammen und mehreren Integrationsfällen. Das Test-APK ist eine weitere, separat auf einem Android-Gerät auszuführende Suite.
+Die Java-Suite enthält 177 Tests (145 ursprüngliche Emulator-Tests und 32 zusätzliche Tests, davon 11 für mehrere Sitzungen); dazu kommen 3 Python-Tests und 3 CTest-Läufe mit zwei Testprogrammen und mehreren Integrationsfällen. Das Test-APK ist eine weitere, separat auf einem Android-Gerät auszuführende Suite.
+
+## Sitzungen beenden 0.1.8
+
+Die Android-Instrumentation verwendet für die Stop-Regressionen den gepinnten PRoot samt Loader aus der APK und das produktive Stop-Backend des Dienstes. Innerhalb von PRoot läuft eine Android-Shell, die SIGTERM ignoriert und zusätzlich einen per setsid abgekoppelten Kindprozess startet. Eine Arch-Installation wird dafür weder benötigt noch verändert. Die vorherigen einfachen Android-Shell-Fixtures bleiben für Tastatur und Tabnavigation erhalten.
+
+- Menü: Zwei PRoot-Sitzungen öffnen, die ausgewählte Sitzung über „Sitzung schließen“ und die Bestätigung beenden, das Ende ihres abgekoppelten Kindes prüfen und in der anderen Shell weiterarbeiten. Danach die letzte Sitzung genauso schließen; Activity, Benachrichtigung und WakeLock müssen enden.
+- Benachrichtigung: Mit zwei PRoot-Sitzungen die Activity in den Hintergrund schicken und den echten „Alle beenden“-PendingIntent aus der publizierten Benachrichtigung auslösen. Beide Tracer und ihre abgekoppelten Kinder müssen beendet sein. Ein zusätzlicher Testclient hält die Dienstbindung, während das Verschwinden von Benachrichtigung und WakeLock geprüft wird. Ein wiederholter Stop darf keine leere Benachrichtigung zurückbringen.
+
+Die Ursache in 0.1.7 ist im gepinnten PRoot-Signalhandler nachvollziehbar: SIGTERM wird ignoriert; SIGQUIT ruft kill_all_tracees auf und lässt die Ereignisschleife aufräumen. Der Dienst wählt jetzt SIGQUIT. Es wird keine Befehls-, Leerlauf- oder Ausgabefrist eingeführt.
+
+Die vollständige Android-Instrumentation besteht mit archterminal.success=true, einschließlich beider neuen Stop-Regressionen sowie aller bisherigen Start-, Tastatur- und Mehrsitzungstests. Protokoll: output/tests/0.1.8/android.txt. Auch 177 Java-Tests, 3 native CTest-Läufe, 3 Python-Tests und Android Lint sind erfolgreich. Die ARM64-APK ist auf Version 0.1.8 / versionCode 9, Signatur, ZIP-/ELF-Ausrichtung und Laufzeitdateien geprüft; Protokolle: output/tests/0.1.8/host-java-lint.txt und build.txt.
+
+Tests und Builds laufen weiterhin nacheinander mit einem CPU-Kern und einem Worker. Der erfolgreiche Android-11-Emulatorlauf verwendet einen virtuellen Kern, auf Host und Gast CPU 0, Softwaregrafik und deaktiviertes Vulkan. Wegen belegtem Speicherdruck mit 768 MiB und Systemserver-Watchdogs erhält der Testgast 1 GiB RAM; der Host-Spitzen-RSS beträgt 1.568.184 KiB, bei mindestens 763.852 KiB verfügbarem Host-Speicher. Die Startprüfung verwendet die erreichbare Oberfläche anstelle der globalen Broadcast-Leerlaufabfrage. Messungen und Startdiagnosen stehen unter output/tests/0.1.8/.
+
+## Mehrere Sitzungen 0.1.7
+
+Die Android-unabhängige JUnit-Suite prüft den Lebenszyklus über ein austauschbares Backend. Insbesondere dürfen ein fehlgeschlagener neuer PTY-Start, ein fehlgeschlagener Neustart und verspätete Exit-Callbacks weder die Auswahl noch andere laufende Sitzungen verändern. Schließende Prozesse bleiben bis zum Exit-Callback verwaltet; das gemeinsame Schließen wartet auf alle Prozesse. Natürlich beendete Tabs behalten ihre Ausgabe und werden beim Neustart an derselben Position unter derselben Nummer ersetzt.
+
+Die Android-Instrumentation verwendet bis zu drei parallele temporäre JNI-PTYs mit Android-Shells sowie einen anschließenden Tab-Neustart, ohne ein Arch-Dateisystem zu installieren oder zu verändern. Sie prüft die tatsächlichen Plus- und Menü-Aktionen, getrennte Shellvariablen und Ausgabe, IME-Eingabe, Tabwechsel und Schließen, Fokus und zurückgesetzte CTRL-Zustände, Navigation bei ausgeblendeten Zusatztasten, Hintergrundausgabe sowie Dienst-Neuanbindung mit erhaltener Auswahl. Das Schließen eines Terminals und der natürliche Exit eines Hintergrundterminals müssen die anderen Shells und deren WakeLock erhalten. Enter startet ausschließlich den beendeten Tab unter derselben Nummer neu. Nach dem letzten Testprozess dürfen weder verwaltete Terminals noch ein WakeLock zurückbleiben. Bestehende Start-, Logo- und Tastaturregressionen bleiben enthalten.
+
+Für 0.1.7 werden Tests und Builds nacheinander unter `taskset -c 0 nice -n 10` ausgeführt: ein CPU-Kern, `ARCH_BUILD_JOBS=1`, `CMAKE_BUILD_PARALLEL_LEVEL=1`, `CTEST_PARALLEL_LEVEL=1`, ein Gradle-Worker, keine parallelen Test-Forks und Java mit `-XX:ActiveProcessorCount=1 -XX:+UseSerialGC`. Der Emulator wird anschließend mit einem virtuellen Kern, 768 MiB Gast-RAM und Softwaregrafik bei deaktiviertem Vulkan gestartet. Die Mehrsitzungsabnahme mit Arch/PRoot auf ARM64-Geräten bleibt separat erforderlich.
+
+Die vollständige Android-Instrumentation besteht mit `archterminal.success=true`, einschließlich Plus-/Menü-Erzeugung, IME, Tabwechsel, Hintergrund/Rückkehr, isoliertem Schließen, natürlichem Hintergrundende, Enter-Neustart und WakeLock-Freigabe. Protokoll: `output/tests/0.1.7/android.txt`. Der erfolgreiche Emulatorlauf verwendet nachweislich nur CPU 0 auf Host und Gast; sein Spitzen-RSS beträgt 1.289.692 KiB. Nach einem anfänglichen System-UI-ANR wird vor der Instrumentation auf das Ende der Android-Boot-Broadcasts gewartet. Der IME-Test wartet auf das tatsächlich angehängte und vollständig aufgebaute Terminal, bevor er Eingabe sendet. Messungen und Vorprüfung liegen ebenfalls unter `output/tests/0.1.7/`.
+
+Auch die abschließenden 177 Java-Tests, 3 nativen CTest-Läufe einschließlich gleichzeitiger PTYs, 3 Python-Tests und Android Lint bestehen. Der abschließende ARM64-Build und die Prüfung der APK auf Version 0.1.7 / versionCode 8, Signatur, ZIP-/ELF-Ausrichtung und Laufzeitdateien sind erfolgreich. Protokolle: `output/tests/0.1.7/host-java-lint.txt` und `build.txt`. Es verbleiben ausschließlich die unten dokumentierten bestehenden Lint-Hinweise.
 
 ## Installationsanzeige 0.1.6
 

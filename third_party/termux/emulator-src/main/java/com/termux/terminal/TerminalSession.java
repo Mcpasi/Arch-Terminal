@@ -141,10 +141,11 @@ public final class TerminalSession extends TerminalOutput {
         catch (IOException error) { return null; }
     }
     public void reset() { if (emulator != null) { emulator.reset(); client.onTextChanged(this); } }
-    public void finishIfRunning() {
+    public void finishIfRunning() { finishIfRunning(OsConstants.SIGTERM); }
+    /** Let the process owner choose the shutdown signal required by its child. */
+    public void finishIfRunning(int signal) {
         if (isRunning()) {
-            // PRoot handles SIGTERM and kills/reaps its tracees, including detached guest jobs.
-            try { Os.kill(pid, OsConstants.SIGTERM); }
+            try { Os.kill(pid, signal); }
             catch (Exception error) { client.logWarn("PTY", error.getMessage()); }
         }
     }

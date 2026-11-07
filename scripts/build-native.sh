@@ -21,7 +21,7 @@ cc="$toolchain/aarch64-linux-android28-clang"
   -c .build/sources/talloc/talloc.c -o "$native_build/talloc/talloc.o"
 "$toolchain/llvm-ar" rcs "$native_build/talloc/libtalloc.a" "$native_build/talloc/talloc.o"
 make -C "$ARCH_PROJECT_ROOT/.build/sources/proot/src" \
-  -j"${ARCH_BUILD_JOBS:-4}" CC="$cc" LD="$cc" \
+  -j"${ARCH_BUILD_JOBS:-1}" CC="$cc" LD="$cc" \
   OBJCOPY="$toolchain/llvm-objcopy" OBJDUMP="$toolchain/llvm-objdump" STRIP="$toolchain/llvm-strip" \
   PROOT_UNBUNDLE_LOADER=/unused \
   HAS_LOADER_32BIT= \
@@ -34,7 +34,7 @@ cmake -S . -B "$native_build/cmake" -G 'Unix Makefiles' \
   -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-28 -DANDROID_STL=c++_static \
   -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
   -DCMAKE_BUILD_TYPE=Release -DLIBARCHIVE_SOURCE="$ARCH_PROJECT_ROOT/.build/sources/libarchive"
-cmake --build "$native_build/cmake" --target archterminal -j"${ARCH_BUILD_JOBS:-4}"
+cmake --build "$native_build/cmake" --target archterminal -j"${ARCH_BUILD_JOBS:-1}"
 cp "$native_build/cmake/libarchterminal.so" "$output/libarchterminal.so"
 "$toolchain/llvm-strip" --strip-unneeded "$output/libarchterminal.so" "$output/libproot.so"
 mkdir -p app/build/generated/assets/licenses

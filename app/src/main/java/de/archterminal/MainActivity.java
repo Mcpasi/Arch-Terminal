@@ -34,6 +34,7 @@ import com.termux.view.TerminalView;
 import com.termux.view.TerminalViewClient;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
+import java.util.Collections;
 
 public final class MainActivity extends Activity {
     private TerminalService service;
@@ -41,6 +42,7 @@ public final class MainActivity extends Activity {
     private TerminalSession attached;
     private LinearLayout root, setup;
     private HorizontalScrollView keys;
+    private SessionBar sessionBar;
     private TextView message;
     private ImageView startupLogo;
     private ObjectAnimator logoPulse;
@@ -48,11 +50,12 @@ public final class MainActivity extends Activity {
     private boolean bound, started, ctrl, altDown, volumeControl;
     private int textSize;
     private float accumulatedScale = 1f;
+    private final TerminalService.Listener sessionListener = this::render;
 
     private final ServiceConnection connection = new ServiceConnection() {
         @Override public void onServiceConnected(ComponentName name, IBinder binder) {
             service = ((TerminalService.LocalBinder) binder).service();
-            service.listen(MainActivity.this::render);
+            service.listen(sessionListener);
             if (service.ready() && service.session() == null) service.startSession();
         }
         @Override public void onServiceDisconnected(ComponentName name) { service = null; attached = null; render(); }
@@ -63,6 +66,12 @@ public final class MainActivity extends Activity {
         root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
         root.setBackgroundColor(Color.rgb(9, 13, 18));
+        sessionBar = new SessionBar(this, new SessionBar.Listener() {
+            @Override public void select(SessionManager.Entry<TerminalSession> entry) { if (service != null) service.selectSession(entry); }
+            @Override public void close(SessionManager.Entry<TerminalSession> entry) { closeSession(entry); }
+            @Override public void create() { if (service != null) service.startSession(); }
+        });
+        root.addView(sessionBar, new LinearLayout.LayoutParams(-1, dp(48)));
         terminal = new TerminalView(this, null);
         // The embedded view relies on its host to enable focus for IME input.
         terminal.setFocusable(true);
@@ -151,7 +160,7 @@ public final class MainActivity extends Activity {
     @Override protected void onStop() {
         started = false;
         updateLogoAnimation();
-        if (service != null) service.listen(null);
+        if (service != null) service.unlisten(sessionListener);
         if (bound) unbindService(connection);
         bound = false;
         service = null;
@@ -184,14 +193,24 @@ public final class MainActivity extends Activity {
             | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY | View.SYSTEM_UI_FLAG_LAYOUT_STABLE | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION);
     }
     private void render() {
+        if (service != null && service.stopping() && service.sessions().isEmpty()) { finish(); return; }
         TerminalSession current = service == null ? attached : service.session();
         boolean hasSession = current != null;
+        sessionBar.setVisibility(hasSession ? View.VISIBLE : View.GONE);
+        sessionBar.render(service == null ? Collections.emptyList() : service.sessions(),
+            service == null ? null : service.selectedSession(), service != null && !service.stopping());
         terminal.setVisibility(hasSession ? View.VISIBLE : View.GONE);
         setup.setVisibility(hasSession ? View.GONE : View.VISIBLE);
         updateLogoAnimation();
         keys.setVisibility(hasSession && getPreferences(MODE_PRIVATE).getBoolean("keys", true) ? View.VISIBLE : View.GONE);
         if (hasSession) {
-            if (attached != current) { attached = current; terminal.attachSession(current); terminal.requestFocus(); }
+            if (attached != current) {
+                // Modifier latches belong to the current interaction, not to another shell.
+                ctrl = altDown = volumeControl = false;
+                control.setSelected(false); control.setTextColor(Color.LTGRAY);
+                alt.setSelected(false); alt.setTextColor(Color.LTGRAY);
+                attached = current; terminal.attachSession(current); terminal.requestFocus();
+            }
             terminal.onScreenUpdated();
         } else {
             // The rootfs marker is available before the asynchronous service connection.
@@ -211,14 +230,14 @@ public final class MainActivity extends Activity {
         action.setEnabled(installAction || retryAction);
         cancel.setVisibility(connected && installing ? View.VISIBLE : View.GONE);
     }
-    private void send(String text) { if (attached != null && attached.isRunning()) attached.write(text); terminal.requestFocus(); }
-    private void arrow(int code) { terminal.handleKeyCode(code, 0); terminal.requestFocus(); }
+    private void send(String text) { if (service != null && attached != null && attached.isRunning()) attached.write(text); terminal.requestFocus(); }
+    private void arrow(int code) { if (service != null) terminal.handleKeyCode(code, 0); terminal.requestFocus(); }
     private void keyboard() {
         terminal.requestFocus();
         ((InputMethodManager)getSystemService(INPUT_METHOD_SERVICE)).toggleSoftInput(InputMethodManager.SHOW_FORCED, 0);
     }
     private void menu() {
-        String[] options = {"Tastatur ein / aus", "CTRL-C", "Neue Sitzung nach Ende", "PRoot-Kompatibilität", "CPU-Wachhaltung ein / aus", "Schrift kleiner", "Schrift größer", "Lizenzen", "Sitzung beenden", "Zusatztasten ein / aus"};
+        String[] options = {"Tastatur ein / aus", "CTRL-C", "Neue Sitzung", "PRoot-Kompatibilität", "CPU-Wachhaltung ein / aus", "Schrift kleiner", "Schrift größer", "Lizenzen", "Sitzung schließen", "Zusatztasten ein / aus", "Alle Sitzungen beenden"};
         new AlertDialog.Builder(this).setTitle("Arch Terminal").setItems(options, (dialog, which) -> {
             switch (which) {
                 case 0: keyboard(); break;
@@ -232,11 +251,17 @@ public final class MainActivity extends Activity {
                 case 5: font(-1); break;
                 case 6: font(1); break;
                 case 7: licenses(); break;
-                case 8: if (service != null) new AlertDialog.Builder(this).setMessage("Sitzung und laufende Prozesse beenden?").setNegativeButton("Zurück", null)
-                    .setPositiveButton("Beenden", (d, w) -> { service.stopSession(); finish(); }).show(); break;
+                case 8: if (service != null) closeSession(service.selectedSession()); break;
                 case 9: getPreferences(MODE_PRIVATE).edit().putBoolean("keys", !getPreferences(MODE_PRIVATE).getBoolean("keys", true)).apply(); render(); break;
+                case 10: if (service != null) new AlertDialog.Builder(this).setMessage("Alle Sitzungen und ihre laufenden Prozesse beenden?")
+                    .setNegativeButton("Zurück", null).setPositiveButton("Alle beenden", (d, w) -> { if (service != null) service.stopAllSessions(); }).show(); break;
             }
         }).show();
+    }
+    private void closeSession(SessionManager.Entry<TerminalSession> entry) {
+        if (service == null || entry == null || entry.closing()) return;
+        new AlertDialog.Builder(this).setMessage("Terminal " + entry.number + " und seine laufenden Prozesse beenden?")
+            .setNegativeButton("Zurück", null).setPositiveButton("Schließen", (dialog, which) -> { if (service != null) service.closeSession(entry); }).show();
     }
     private void licenses() {
         try {
@@ -274,7 +299,7 @@ public final class MainActivity extends Activity {
         public boolean isTerminalViewSelected() { return true; }
         public void copyModeChanged(boolean mode) {}
         public boolean onKeyDown(int code, KeyEvent event, TerminalSession session) {
-            if (code == KeyEvent.KEYCODE_ENTER && !session.isRunning() && service != null) { service.startSession(); return true; }
+            if (code == KeyEvent.KEYCODE_ENTER && !session.isRunning() && service != null) { service.restartSession(); return true; }
             return false;
         }
         public boolean onKeyUp(int code, KeyEvent event) { return false; }
@@ -284,7 +309,7 @@ public final class MainActivity extends Activity {
         public boolean readShiftKey() { return false; }
         public boolean readFnKey() { return false; }
         public boolean onCodePoint(int point, boolean down, TerminalSession session) {
-            if ((point == 10 || point == 13) && !session.isRunning() && service != null) { service.startSession(); return true; }
+            if ((point == 10 || point == 13) && !session.isRunning() && service != null) { service.restartSession(); return true; }
             return false;
         }
         public void onEmulatorSet() {}
