@@ -1,5 +1,12 @@
 # Änderungen
 
+## 0.1.9 · versionCode 10
+
+- Vorzeitiges Entfernen oder Ersetzen einer Sitzung zwischen Prozessende und vollständigem PTY-Ausgabedrain behoben. Der Sitzungsmanager merkt sich den abschließenden Exit-Callback; Schließen und gemeinsames Beenden behalten den Eintrag bis dahin, ein Neustart ist erst danach möglich.
+- Dienstabschluss beim kurz aufeinanderfolgenden Schließen aller Tabs korrigiert. Bereits schließende Tabs zählen nicht mehr als offen; nach dem letzten Exit-Callback verschwinden Vordergrundbenachrichtigung und WakeLock, und eine verbundene Activity schließt sich.
+- Beide Fehler vor ihrer jeweiligen Korrektur reproduziert: JUnit sowie echte Android-PTYs mit kontrolliert verzögerter letzter Ausgabe; überlappende Schließanforderungen mit echtem PRoot und seinem produktiven Stop-Backend. Regressionstests bleiben für Schließen, Neustart und gemeinsame Bereinigung enthalten.
+- Version, APK-/Quellarchivnamen, Geräte-Testskript und Lizenzhinweis auf 0.1.9 angehoben. Dokumentation zu mehreren Sitzungen, Abschlusszeitpunkt und vorhandenen Hardware-Rückmeldungen abgeglichen. Tests und Builds laufen mit einem CPU-Kern und einem Worker nacheinander.
+
 ## 0.1.8 · versionCode 9
 
 - Beenden über Menü und Android-Benachrichtigung korrigiert: Der gepinnte PRoot ignoriert SIGTERM. Der Dienst sendet jetzt SIGQUIT, wodurch PRoots eigene Bereinigung sämtliche Tracees einschließlich abgekoppelter Prozesse beendet und abwartet. Die generische Terminalbibliothek lässt das Beendigungssignal durch ihren Prozessbesitzer wählen.

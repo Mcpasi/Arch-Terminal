@@ -4,7 +4,7 @@ Native Android-Konsole für **Arch Linux ARM aarch64**, mit C++-PTY, PRoot und p
 
 Die App zeigt echte VT-Konsolen im Vollbild: ANSI/Truecolor, UTF-8, Cursorsteuerung, alternativer Bildschirm, Scrollback, Touch-Auswahl, Tastatur und Größenänderung der PTY. Die Zusatztasten können ausgeblendet werden. Die Sitzungen gehören einem Vordergrunddienst und bleiben beim Wechsel in andere Apps oder bei ausgeschaltetem Display bestehen, solange Android den Prozess laufen lässt.
 
-0.1.8 behebt das Beenden über das Drei-Punkte-Menü und die Android-Benachrichtigung. Die zugehörigen Arch-Prozesse einschließlich abgekoppelter Jobs werden beendet; nach der letzten Sitzung verschwinden Benachrichtigung und CPU-Wachhaltung.
+0.1.9 behebt zwei Fehler in der Sitzungsverwaltung: Schließen und Neustart warten auf die vollständige letzte PTY-Ausgabe. Werden mehrere Tabs kurz nacheinander geschlossen, beendet sich der Dienst nach dem letzten Exit-Callback zuverlässig und entfernt Benachrichtigung und CPU-Wachhaltung. Die PRoot-Bereinigung einschließlich abgekoppelter Jobs aus 0.1.8 bleibt enthalten.
 
 Seit 0.1.7 können mehrere Terminals gleichzeitig laufen. **+** in der oberen Sitzungsleiste oder **Neue Sitzung** im Menü öffnet eine weitere Shell. Die Tabs wechseln zwischen den Sitzungen mit jeweils eigenem Prozess, Arbeitsverzeichnis, Shellzustand und Scrollback; alle verwenden dieselbe Arch-Installation. Langes Drücken auf einen Tab oder **Sitzung schließen** im Menü schließt nach Bestätigung nur diese Sitzung. **Alle Sitzungen beenden** und die Aktion in der Android-Benachrichtigung beenden sämtliche Sitzungen. Beendete Shells behalten ihre Ausgabe; Enter startet nur ihren Tab neu.
 
@@ -32,7 +32,7 @@ Gradle läuft standardmäßig ohne dauerhaften Daemon, mit maximal 1 GiB Java-He
 
 Ergebnisse:
 
-- `output/ArchTerminal-0.1.8-arm64-debug.apk` – installierbare, mit dem lokalen Android-Debugschlüssel signierte App.
+- `output/ArchTerminal-0.1.9-arm64-debug.apk` – installierbare, mit dem lokalen Android-Debugschlüssel signierte App.
 - `output/ArchTerminal-tests.apk` – eigener Android-Instrumentationstest.
 - `output/SHA256SUMS` – Prüfsummen der APKs.
 - `scripts/source-bundle.sh` – App-Quellen und exakte native Quellarchive zur Weitergabe mit einer APK.
@@ -42,7 +42,7 @@ Die CI in `.github/workflows/build.yml` führt Hosttests, Java-Tests, Lint, Buil
 ## Auf dem Smartphone
 
 ```bash
-adb install -r output/ArchTerminal-0.1.8-arm64-debug.apk
+adb install -r output/ArchTerminal-0.1.9-arm64-debug.apk
 ```
 
 App öffnen und **Arch installieren / fortsetzen** wählen. Der erste Download umfasst ungefähr 791 MiB; mindestens 5 GiB freien internen Speicher vorsehen. Das Arch-Archiv wird gegen den gepinnten SHA-256 geprüft, zunächst in ein separates Verzeichnis entpackt und erst nach vollständiger Konfiguration aktiviert. Unterbrochene Downloads lassen sich fortsetzen. Ein fehlgeschlagener Installationsversuch überschreibt kein vorhandenes Arch.
@@ -81,7 +81,7 @@ Die App hat **keine Befehls-, Leerlauf- oder Ausgabelaufzeitgrenze**. 10.000 Scr
 
 Der Arch-Installer hat einen 20-Sekunden-Verbindungsaufbauversuch und keinen Lese- oder Gesamtzeitdeckel. Ein Verbindungsfehler ist erneut versuchbar und betrifft keine laufende Konsole. Prüfsummenfehler verhindern die Aktivierung eines falschen Arch-Archivs.
 
-Vordergrunddienst und abschaltbarer, während der Arbeit gehaltener CPU-WakeLock unterstützen lange Sitzungen. Androids Prozessbeendigung, Hersteller-Energiesparregeln und Neustarts können eine unprivilegierte App weiterhin beenden. Das Verhalten auf echten Geräten ist noch zu prüfen. Target 28 ist keine Google-Play-Veröffentlichungsstrategie. Siehe [offene Arbeiten](docs/OFFEN.md).
+Vordergrunddienst und abschaltbarer, während der Arbeit gehaltener CPU-WakeLock unterstützen lange Sitzungen. Androids Prozessbeendigung, Hersteller-Energiesparregeln und Neustarts können eine unprivilegierte App weiterhin beenden. Erfolgreiche Geräte-Rückmeldungen für 0.1.6 und 0.1.8 sind dokumentiert; Langzeitverhalten unter Hersteller-Energiesparregeln und die Änderungen in 0.1.9 bleiben auf Geräten zu prüfen. Target 28 ist keine Google-Play-Veröffentlichungsstrategie. Siehe [offene Arbeiten](docs/OFFEN.md).
 
 ## Tests
 

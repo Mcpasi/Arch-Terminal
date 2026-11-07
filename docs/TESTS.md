@@ -1,6 +1,6 @@
 # Testkonzept und Stand
 
-Stand: Version 0.1.8, 7. November 2026. Die Host-Prüfungen liefen auf Linux x86_64 mit JDK 17, Android SDK 36 und NDK r28c. Ein Android-11-Emulator (API 30, AOSP x86_64) dient den Start-/JNI-, Tastatur- und Mehrsitzungsregressionen. Diese Prüfungen ersetzen keine ARM64-/PRoot-Geräteabnahme.
+Stand: Version 0.1.9, 7. November 2026. Die Host-Prüfungen liefen auf Linux x86_64 mit JDK 17, Android SDK 36 und NDK r28c. Ein Android-11-Emulator (API 30, AOSP x86_64) dient den Start-/JNI-, Tastatur- und Mehrsitzungsregressionen. Diese Prüfungen ersetzen keine ARM64-/PRoot-Geräteabnahme.
 
 ## Wiederholbare Suite
 
@@ -13,13 +13,36 @@ Stand: Version 0.1.8, 7. November 2026. Die Host-Prüfungen liefen auf Linux x86
 | Android-Hardlink-Sperre, CTest | gleiche Entpacktests mit `link` und `linkat` durch seccomp auf EACCES gesperrt; normaler Probe-Hardlink muss tatsächlich scheitern |
 | App-Java, JUnit | Argumente mit Leerzeichen; separate Host-/Guest-Umgebung; expliziter seccomp-Kompatibilitätsmodus; pacman-Signaturpflicht und Konfiguration; unvollständiges Rootfs ablehnen; einmaliger Mirror-/Rechte-Upgrade mit Erhalt eigener Mirrorlisten/Shellprofile und Wiederaufnahme nach Fehlern; schreibgeschütztes Staging ohne Symlink-Folgen aufräumen |
 | Download-Java, JUnit | echte lokale HTTP-Verbindungen: Range-Fortsetzung, ignorierte Range mit sauberem Neustart, Verbindungsabbruch und Wiederaufnahme, falsche Content-Range, Abbruch mit erhaltenem Teilarchiv |
-| Sitzungsverwaltung, JUnit | unabhängiger Shellzustand und Auswahl; Start-/Neustartfehler; stabile Terminalnummern; gezieltes Schließen und benachbarte Auswahl; Hintergrundende mit erhaltenem Transcript; Neustart nur des beendeten Tabs; verspätete Callbacks; unveränderliche Listensnapshots; gemeinsame Bereinigung |
+| Sitzungsverwaltung, JUnit | unabhängiger Shellzustand und Auswahl; Start-/Neustartfehler; stabile Terminalnummern; gezieltes Schließen und benachbarte Auswahl; Hintergrundende mit erhaltenem Transcript; Neustart nur des beendeten Tabs; verspätete Callbacks; unveränderliche Listensnapshots; gemeinsame Bereinigung; Prozessende vor vollständigem Ausgabedrain beim Schließen, Neustart und gemeinsamen Beenden |
 | Eingabequeue, JUnit | kopierte Eingabedaten und FIFO; voller Puffer blockiert/beendet die Sitzung nicht; Writer wird beim Schließen geweckt |
 | Upstream-Emulator, JUnit | vorhandene VT-/Unicode-/Cursor-/Farb-/Scroll-/Escape-Sequenz-Regressionssuite |
 | Python | gepinnte native Inputs, Rootfs-Architektur/Schlüssel/Hash und Gradle-Prüfsumme |
 | Android Lint | API-Verwendung, Ressourcen und App-Code |
 
-Die Java-Suite enthält 177 Tests (145 ursprüngliche Emulator-Tests und 32 zusätzliche Tests, davon 11 für mehrere Sitzungen); dazu kommen 3 Python-Tests und 3 CTest-Läufe mit zwei Testprogrammen und mehreren Integrationsfällen. Das Test-APK ist eine weitere, separat auf einem Android-Gerät auszuführende Suite.
+Die Java-Suite enthält 180 Tests (145 ursprüngliche Emulator-Tests und 35 zusätzliche Tests, davon 14 für mehrere Sitzungen); dazu kommen 3 Python-Tests und 3 CTest-Läufe mit zwei Testprogrammen und mehreren Integrationsfällen. Das Test-APK ist eine weitere, separat auf einem Android-Gerät auszuführende Suite.
+
+## Sitzungslebenszyklus 0.1.9
+
+Beide Fehler wurden vor ihrer jeweiligen Korrektur reproduziert. Die Android-Nachweise verwenden die gesicherte, unveränderte 0.1.8-App; App- und Test-APK sind mit SHA-256 unter `output/tests/0.1.9/reproduction-apks.sha256` festgehalten.
+
+- **Prozessende vor vollständiger Ausgabe:** Ein Android-Shell-Kind hält die PTY offen, während der Elternprozess bereits von `waitpid` eingesammelt ist. Der Test prüft ausdrücklich `processEnded=true`, `isRunning()=false`, einen noch offenen Reader und den ausstehenden Exit-Callback. Schließen und Neustart verwerfen beziehungsweise ersetzen den Eintrag in 0.1.8 vorzeitig. Die gezielt fehlgeschlagenen Nachweise stehen in `output/tests/0.1.9/before/drain-close.txt` und `drain-restart.txt`. Nach Freigabe des Kindes muss `DEFERRED_TAIL` vollständig ankommen; erst der abschließende Callback darf das Schließen abschließen oder einen Neustart ermöglichen. Drei zusätzliche JUnit-Fälle für Schließen, Neustart und gemeinsames Beenden scheitern ebenfalls am ursprünglichen Manager (`session-manager-before.txt`). Bestehende Tests für bereits vollständig beendete Shells liefern nun auch ausdrücklich ihren Exit-Callback.
+- **Alle Tabs schließen, bevor ein Exit-Callback eintrifft:** Zwei echte PRoot-Sitzungen samt abgekoppelten Kindern werden in demselben Hauptthread-Durchlauf einzeln geschlossen. Der unveränderte Dienst bleibt dabei fälschlich außerhalb seines Stop-Zustands, weil beide Einträge zunächst in der Liste bleiben. Der Test scheitert mit `Closing every tab before exit callbacks must stop the service` (`output/tests/0.1.9/before/overlapping-close.txt`). Die Regression prüft den gebundenen Dienst direkt und erwartet nach beiden tatsächlichen Exits eine leere Sitzungsliste ohne Benachrichtigung und WakeLock; die bisherigen Menütests prüfen weiterhin den Abschluss der Activity.
+
+Die neuen Android-Fälle lassen sich nach Installation von App und Test-APK einzeln ausführen:
+
+```bash
+adb shell am instrument -w -r -e sessionRegression drain-close de.archterminal.test/de.archterminal.TerminalInstrumentation
+adb shell am instrument -w -r -e sessionRegression drain-restart de.archterminal.test/de.archterminal.TerminalInstrumentation
+adb shell am instrument -w -r -e sessionRegression overlapping-close de.archterminal.test/de.archterminal.TerminalInstrumentation
+```
+
+Ohne `sessionRegression` bleiben sie Bestandteil der vollständigen Instrumentation. Für den Vorher-/Nachher-Vergleich wird dasselbe gesicherte Test-APK gegen die alte beziehungsweise korrigierte App verwendet. Es wird keine Arch-Installation verändert.
+
+Mit den Korrekturen bestehen alle 180 Java-Tests, darunter die 14 Sitzungsmanager-Tests, sowie 3 native CTest-Läufe, 3 Python-Tests und Android Lint. Es gibt keine Testfehler oder übersprungenen Java-Tests; Lint meldet ausschließlich die vier unten beschriebenen bestehenden Hinweise. Protokoll: `output/tests/0.1.9/host-java-lint.txt`, Zählung: `test-summary.json`.
+
+Auch die vollständige Android-Instrumentation besteht mit `archterminal.success=true`, einschließlich aller neuen Regressionen, Menü-/Benachrichtigungsstopp, Logo, Tastatur und Mehrsitzungsnavigation (`output/tests/0.1.9/after/android.txt`). Der erste Gesamtlauf scheiterte nach erfolgreichen neuen Regressionen beim vorhandenen Tastaturtest mit `Menu did not reopen keyboard` (`after-window-animations/android.txt`). Die Wiederholung verwendet dieselben unveränderten APKs und dieselben Prüfkriterien; lediglich `window_animation_scale` und `transition_animation_scale` des Testemulators stehen auf 0. `animator_duration_scale=1` erhält die geprüfte Logoanimation. Der erste fehlgeschlagene Lauf samt Logcat bleibt erhalten.
+
+Hosttests, Builds und Emulatorläufe erfolgten nacheinander auf CPU 0 unter `nice -n 10`: `ARCH_BUILD_JOBS=1`, `CMAKE_BUILD_PARALLEL_LEVEL=1`, `CTEST_PARALLEL_LEVEL=1`, ein Gradle-Worker, keine parallelen Test-Forks und Java mit `-XX:ActiveProcessorCount=1 -XX:+UseSerialGC`. Der Emulator verwendet einen virtuellen Kern, 1 GiB Gast-RAM und Softwaregrafik ohne Vulkan; Host-/Gast-Kern und Speicherverbrauch sind unter `output/tests/0.1.9/after/` protokolliert. Die ARM64-APK ist auf Version 0.1.9 / versionCode 10, Signatur, ZIP-/ELF-Ausrichtung und Laufzeitdateien geprüft (`output/tests/0.1.9/build.txt`). Die erneute Geräteprüfung dieser Version bleibt offen.
 
 ## Sitzungen beenden 0.1.8
 
@@ -145,7 +168,7 @@ scripts/test-device.sh --rootfs
 
 Die Skripte prüfen zuerst, ob ein autorisiertes ARM64-Gerät verbunden ist. Ohne Gerät brechen sie mit Exitcode 2 und klarer Meldung ab; es wird kein Bestehen vorgetäuscht. Die zweite Variante setzt ein in der App bereits installiertes Arch voraus.
 
-Der eigene Runner testet seit 0.1.1 zuerst einen kleinen Archiv-Entpackvorgang mit Hardlink-Kette, Dateiinhalten, eigenen Inodes und Ausführungsrechten direkt in der Android-App. Danach folgen JNI-PTY, TTY-Dateideskriptoren, UTF-8, Resize, stille Sitzung, 256 KiB Ausgabe einschließlich letzter Zeilen vor Exit und Ctrl-C. Seit 0.1.2 prüft er außerdem die tatsächliche Activity samt Bildschirmtastatur und Befehlseingabe. `--rootfs` ergänzt PRoot, den glibc-Loader und pacman auf dem Android-Kernel. Ergebnisse landen in `output/tests/device.txt`. Die Ausführung auf ARM64-Hardware steht aus.
+Der eigene Runner testet seit 0.1.1 zuerst einen kleinen Archiv-Entpackvorgang mit Hardlink-Kette, Dateiinhalten, eigenen Inodes und Ausführungsrechten direkt in der Android-App. Danach folgen JNI-PTY, TTY-Dateideskriptoren, UTF-8, Resize, stille Sitzung, 256 KiB Ausgabe einschließlich letzter Zeilen vor Exit und Ctrl-C. Seit 0.1.2 prüft er außerdem die tatsächliche Activity samt Bildschirmtastatur und Befehlseingabe. `--rootfs` ergänzt PRoot, den glibc-Loader und pacman auf dem Android-Kernel. Ergebnisse landen in `output/tests/device.txt`. Die automatisierte Instrumentationssuite für 0.1.9 wurde noch nicht auf ARM64-Hardware ausgeführt. Frühere erfolgreiche Nutzer-Gerätetests für 0.1.6 und 0.1.8 sind in [OFFEN.md](OFFEN.md) dokumentiert.
 
 ## Lint-Hinweise
 

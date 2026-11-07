@@ -1,16 +1,14 @@
 # Offene Arbeiten und Geräteabnahme
 
-Stand: Version 0.1.8, 7. November 2026.
+Stand: Version 0.1.9, 7. November 2026.
 
 ## Vor einer belastbaren Smartphone-Freigabe
 
-Der erste Nutzer-Gerätetest mit 0.1.0 konnte Arch herunterladen, scheiterte beim Entpacken an der auf Android verbotenen Hardlink-Erstellung. Seit 0.1.1 werden dafür Dateikopien verwendet. Für 0.1.2 wurde der Tastaturfehler im Android-11-Emulator (AOSP x86_64) reproduziert und durch Aktivieren des Terminal-Touch-Fokus korrigiert. Der Emulator verwendet die echte Activity und JNI-PTY mit einer Android-Shell. Der komplette **ARM64-/PRoot-/Arch-Ablauf auf einem Smartphone ist weiterhin nicht abgenommen**.
+Der erste Nutzer-Gerätetest mit 0.1.0 konnte Arch herunterladen, scheiterte beim Entpacken an der auf Android verbotenen Hardlink-Erstellung. Seit 0.1.1 werden dafür Dateikopien verwendet. Für 0.1.2 wurde der Tastaturfehler im Android-11-Emulator (AOSP x86_64) reproduziert und durch Aktivieren des Terminal-Touch-Fokus korrigiert. Der Emulator verwendet die echte Activity und JNI-PTY mit einer Android-Shell.
 
-**Der Arch-Ablauf wurde auf Version 0.1.6 erfolgreich getestet, verifiziert auf einem Redmi Note 14 und einem Redmi 14C.**
+**Laut Nutzerrückmeldung wurde der Arch-Ablauf mit 0.1.6 auf einem Redmi Note 14 und einem Redmi 14C erfolgreich getestet. Auch für 0.1.8 liegt eine erfolgreiche Hardware-Rückmeldung vor.** Diese Rückmeldungen bleiben gültig; die Korrekturen in 0.1.9 benötigen eine erneute Geräteprüfung.
 
-**Version 0.1.8 Wurde auf echter Hardware erfolgreich getestet**
-
-Für 0.1.7 zusätzlich mehrere parallele Arch-/PRoot-Sitzungen auf diesen Geräten prüfen: getrennte Shellzustände und Ausgabe, Wechsel während laufender Befehle, gezieltes Schließen, gemeinsames Beenden, Hintergrund/Rückkehr und Wachhaltung bis zum letzten Prozess. Die Android-Regressionen verwenden dafür temporäre Android-Shells; die Geräteabnahme mit mehreren Arch-Sitzungen bleibt separat.
+Für 0.1.9 mehrere parallele Arch-/PRoot-Sitzungen auf diesen Geräten erneut prüfen: getrennte Shellzustände und Ausgabe, Wechsel während laufender Befehle, gezieltes Schließen, gemeinsames Beenden, Hintergrund/Rückkehr und Wachhaltung bis zum letzten Prozess. Zusätzlich Tabs kurz nacheinander schließen sowie Schließen/Neustart bei ausstehender letzter Ausgabe prüfen. Die automatisierten Android-Regressionen verwenden temporäre Android-Shells und für die Stop-Tests echtes PRoot ohne Arch-Installation.
 
 - `scripts/test-device.sh` auf ARM64 Android ausführen; danach Arch in der App installieren und `scripts/test-device.sh --rootfs` ausführen.
 - Android 9/10, 13 sowie 15/16 prüfen, jeweils soweit Geräte verfügbar sind. Mindestens ein Gerät mit 16-KiB-Speicherseiten testen.
@@ -31,9 +29,9 @@ Für 0.1.7 zusätzlich mehrere parallele Arch-/PRoot-Sitzungen auf diesen Gerät
 - Der offizielle `mirror.archlinuxarm.org`-HTTPS-Endpunkt meldet weiterhin einen TLS-Hostnamefehler. pacman verwendet seit 0.1.3 die direkt geprüften HTTPS-Adressen von RWTH Aachen und dotsrc. Das SHA-256-gepinnte Bootstrap-Archiv bleibt bei Princeton. Erreichbarkeit und Fallback auf dem Zielgerät prüfen.
 - Maven-Inputs sind in `gradle/verification-metadata.xml` mit SHA-256 erfasst; native Archive, SDK/NDK-Versionen, Gradle und Arch-Image sind gepinnt. Für Byte-identische Builds sind zusätzlich der Signaturschlüssel und weitere Host-/Zeitstempelparameter zu vereinheitlichen.
 
-## Grenzen dieser ersten Version
+## Aktuelle Grenzen
 
-- Eine Sitzung; keine Tabs oder mehreren parallelen Konsolen.
+- Mehrere Sitzungen mit eigenen PTYs, Shellzuständen und Scrollback sind vorhanden; Arch-Dateisystem und Paketdatenbank werden gemeinsam verwendet.
 - Keine eingebaute Sicherung, Wiederherstellung oder Android-Dateiauswahl. App-Deinstallation löscht das Arch-Dateisystem.
 - DNS wird beim Sitzungsstart ermittelt; automatisches Aktualisieren bei einem Netzwerkwechsel ist noch nicht implementiert. Eine neue Sitzung verwendet die aktuelle Verbindung.
 - Die CPU-Wachhaltung ist standardmäßig aktiv und abschaltbar. Bildschirm-Wachhaltung, WLAN-Lock, Batterie-Optimierungsdialog und herstellerspezifische Automatisierung sind nicht integriert.

@@ -47,17 +47,28 @@ public final class TerminalInstrumentation extends Instrumentation {
     @Override public void onStart() {
         Bundle result = new Bundle();
         try {
-            testExtraction();
-            testUpgradeFailureDoesNotBlockShell();
-            testPty();
-            testTail();
-            testInterrupt();
-            testSessionStopActions(false);
-            testSessionStopActions(true);
-            if ("true".equals(arguments.getString("rootfs"))) testArch();
-            testStartupLogo();
-            testKeyboard();
-            testMultipleSessions();
+            if ("overlapping-close".equals(arguments.getString("sessionRegression"))) {
+                testSessionStopActions(false, true);
+            } else if ("drain-close".equals(arguments.getString("sessionRegression"))) {
+                testDeferredSessionOutput(true);
+            } else if ("drain-restart".equals(arguments.getString("sessionRegression"))) {
+                testDeferredSessionOutput(false);
+            } else {
+                testExtraction();
+                testUpgradeFailureDoesNotBlockShell();
+                testPty();
+                testTail();
+                testInterrupt();
+                testDeferredSessionOutput(true);
+                testDeferredSessionOutput(false);
+                testSessionStopActions(false, false);
+                testSessionStopActions(true, false);
+                testSessionStopActions(false, true);
+                if ("true".equals(arguments.getString("rootfs"))) testArch();
+                testStartupLogo();
+                testKeyboard();
+                testMultipleSessions();
+            }
             result.putString("stream", "\nPASS\n" + passed);
             result.putBoolean("archterminal.success", true);
             finish(Activity.RESULT_OK, result);
@@ -328,9 +339,76 @@ public final class TerminalInstrumentation extends Instrumentation {
         catch (Exception error) { throw new AssertionError(error); }
         return manager;
     }
+    private void testDeferredSessionOutput(boolean close) throws Exception {
+        Path temporary = Files.createTempDirectory(getTargetContext().getCacheDir().toPath(), "session-drain-");
+        Path release = temporary.resolve("release");
+        List<Probe> probes = new ArrayList<>();
+        SessionManager<TerminalSession> isolated = new SessionManager<>(new SessionManager.Backend<TerminalSession>() {
+            @Override public TerminalSession create() {
+                String command = probes.isEmpty()
+                    ? "trap '' HUP; (while [ ! -f '" + release + "' ]; do sleep 0.05; done; printf 'DEFERRED_%s\\n' TAIL) & exit 0"
+                    : "trap 'exit 0' TERM; printf 'RESTART_READY\\n'; while IFS= read -r line; do :; done";
+                Probe probe = new Probe();
+                probe.session = new TerminalSession("/system/bin/sh", getTargetContext().getFilesDir().getAbsolutePath(),
+                    new String[]{"sh", "-c", command}, new String[]{"PATH=/system/bin", "TERM=xterm-256color"}, 10000, probe);
+                probe.session.updateSize(80, 24, 0, 0);
+                probes.add(probe);
+                return probe.session;
+            }
+            @Override public boolean isRunning(TerminalSession session) { return session.isRunning(); }
+            @Override public void finish(TerminalSession session) { session.finishIfRunning(); }
+        });
+        SessionCallbacks callbacks = new SessionCallbacks() {
+            @Override public void onSessionFinished(TerminalSession session) { isolated.finished(session); }
+        };
+        try {
+            checkUi(() -> {
+                try { isolated.create(); }
+                catch (Exception error) { throw new AssertionError(error); }
+                probes.get(0).delegate = callbacks;
+            });
+            Probe first = probes.get(0);
+            // The child deliberately holds the PTY open after waitpid has reaped its parent.
+            awaitUi(() -> (boolean) field(first.session, "processEnded"), "Drain fixture's parent did not exit");
+            checkUi(() -> {
+                if (first.session.isRunning() || (boolean) field(first.session, "outputEnded") || first.finished.getCount() != 1)
+                    throw new AssertionError("Drain fixture must have a reaped process and an open PTY reader");
+                SessionManager.Entry<TerminalSession> original = isolated.selected();
+                try {
+                    if (close) isolated.close(original); else isolated.restartSelected();
+                } catch (Exception error) { throw new AssertionError(error); }
+                if (isolated.selected() != original || !isolated.entries().contains(original))
+                    throw new AssertionError(close ? "Close discarded a PTY before its final output callback"
+                        : "Restart replaced a PTY before its final output callback");
+            });
+            Files.createFile(release);
+            first.awaitExit();
+            if (!first.text.contains("DEFERRED_TAIL")) throw new AssertionError("Deferred PTY output was lost");
+            checkUi(() -> {
+                if (close) {
+                    if (!isolated.isEmpty()) throw new AssertionError("Closed draining PTY remained after its callback");
+                } else {
+                    if (isolated.selected().terminal != first.session) throw new AssertionError("Drained transcript was replaced automatically");
+                    try { isolated.restartSelected(); }
+                    catch (Exception error) { throw new AssertionError(error); }
+                    probes.get(1).delegate = callbacks;
+                    if (isolated.selected().number != 1 || isolated.selected().terminal == first.session)
+                        throw new AssertionError("Completed tab did not restart under its original number");
+                }
+            });
+            if (!close) probes.get(1).awaitText("RESTART_READY");
+            passed.append(close ? "Close while draining: reaped parent, live PTY reader, deferred tail retained through callback\n"
+                : "Restart while draining: waits for deferred tail, keeps transcript, restarts completed tab under the same number\n");
+        } finally {
+            Files.write(release, new byte[0]);
+            runOnMainSync(() -> { for (Probe probe : probes) { probe.delegate = null; probe.session.finishIfRunning(); } });
+            for (Probe probe : probes) if (!probe.finished.await(10, TimeUnit.SECONDS)) throw new AssertionError("Drain fixture cleanup did not finish");
+            RootfsInstaller.deleteTree(temporary);
+        }
+    }
     /** Use real PRoot and the service's production stop backend, including detached tracees. */
     @SuppressWarnings("unchecked")
-    private void testSessionStopActions(boolean fromNotification) throws Exception {
+    private void testSessionStopActions(boolean fromNotification, boolean overlapping) throws Exception {
         Context context = getTargetContext();
         AtomicReference<TerminalService> owner = new AtomicReference<>();
         CountDownLatch connectedLatch = new CountDownLatch(1);
@@ -388,11 +466,25 @@ public final class TerminalInstrumentation extends Instrumentation {
                 probe.awaitText("STOP_READY");
                 awaitUi(() -> stopChildPid(probe) > 0, "Detached PRoot child did not start: " + probe.text);
             }
-            activity = startActivitySync(new Intent(context, MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+            if (!overlapping) activity = startActivitySync(new Intent(context, MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
             Activity current = activity;
-            awaitUi(() -> field(current, "service") == connected && current.hasWindowFocus(), "Stop-test Activity did not connect");
+            if (!overlapping) awaitUi(() -> field(current, "service") == connected && current.hasWindowFocus(), "Stop-test Activity did not connect");
             Probe first = probes.get(0), second = probes.get(1);
-            if (fromNotification) {
+            if (overlapping) {
+                checkUi(() -> {
+                    List<SessionManager.Entry<TerminalSession>> entries = connected.sessions();
+                    connected.closeSession(entries.get(0));
+                    if (connected.stopping()) throw new AssertionError("Closing one tab stopped another open tab");
+                    // Both close requests run in one main-thread turn: neither exit callback can run yet.
+                    connected.closeSession(entries.get(1));
+                    if (!connected.stopping()) throw new AssertionError("Closing every tab before exit callbacks must stop the service");
+                });
+                awaitStopped(first);
+                awaitStopped(second);
+                awaitUi(() -> connected.sessions().isEmpty() && terminalNotification() == null
+                    && !((android.os.PowerManager.WakeLock) field(connected, "wake")).isHeld(),
+                    "Overlapping tab closes left the notification or WakeLock alive");
+            } else if (fromNotification) {
                 android.app.Notification notification = terminalNotification();
                 if (notification == null || notification.actions == null) throw new AssertionError("Terminal notification has no stop action");
                 android.app.PendingIntent stop = null;
@@ -426,7 +518,8 @@ public final class TerminalInstrumentation extends Instrumentation {
                 awaitUi(() -> current.isFinishing() && connected.sessions().isEmpty() && terminalNotification() == null
                     && !((android.os.PowerManager.WakeLock) field(connected, "wake")).isHeld(), "Closing the last session did not finish the Activity and remove its notification/WakeLock");
             }
-            passed.append(fromNotification ? "Notification stop: real PendingIntent in background, both PRoot sessions and detached children reaped, notification/WakeLock removed, repeated stop\n"
+            passed.append(overlapping ? "Overlapping tab closes: both requests before exit callbacks, real PRoot and detached children reaped, notification/WakeLock removed\n"
+                : fromNotification ? "Notification stop: real PendingIntent in background, both PRoot sessions and detached children reaped, notification/WakeLock removed, repeated stop\n"
                 : "Menu close: real PRoot and detached child reaped, other session stays usable, last close finishes Activity and removes notification/WakeLock\n");
         } finally {
             Activity current = activity;
@@ -711,6 +804,14 @@ public final class TerminalInstrumentation extends Instrumentation {
             Thread.sleep(20);
         } while (SystemClock.elapsedRealtime() < deadline);
         throw new AssertionError(failure);
+    }
+    private void checkUi(Runnable action) {
+        AtomicReference<Throwable> failure = new AtomicReference<>();
+        runOnMainSync(() -> {
+            try { action.run(); }
+            catch (Throwable error) { failure.set(error); }
+        });
+        if (failure.get() != null) throw new AssertionError(failure.get().getMessage(), failure.get());
     }
     private static Object field(Object target, String name) { return field(target, name, null, false); }
     private static void field(Object target, String name, Object value) { field(target, name, value, true); }

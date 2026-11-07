@@ -140,8 +140,9 @@ public final class TerminalService extends Service {
     }
     void closeSession(SessionManager.Entry<TerminalSession> entry) {
         if (!sessions.entries().contains(entry)) return;
-        if (sessions.entries().size() == 1) stopping = true;
         sessions.close(entry);
+        // Other tabs may already be closing but still awaiting their PTY exit callbacks.
+        if (sessions.entries().stream().allMatch(SessionManager.Entry::closing)) stopping = true;
         updateWake();
         changed();
         stopIfFinished();

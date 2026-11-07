@@ -74,11 +74,13 @@ public class SessionManagerTest {
         SessionManager.Entry<Shell> last = sessions.create();
         sessions.select(middle);
         middle.terminal.running = false;
+        sessions.finished(middle.terminal);
         assertTrue(sessions.close(middle));
         assertSame(last, sessions.selected());
         assertEquals(1, first.number);
         assertEquals(3, last.number);
         last.terminal.running = false;
+        sessions.finished(last.terminal);
         sessions.close(last);
         assertSame(first, sessions.selected());
         assertEquals(4, sessions.create().number);
@@ -102,6 +104,7 @@ public class SessionManagerTest {
         SessionManager.Entry<Shell> second = sessions.create();
         sessions.select(first);
         first.terminal.running = false;
+        sessions.finished(first.terminal);
         SessionManager.Entry<Shell> replacement = sessions.restartSelected();
         assertNotSame(first.terminal, replacement.terminal);
         assertEquals(first.number, replacement.number);
@@ -116,6 +119,7 @@ public class SessionManagerTest {
     @Test public void failedRestartPreservesEndedTranscriptAndOtherShell() throws Exception {
         SessionManager.Entry<Shell> first = sessions.create();
         first.terminal.running = false;
+        sessions.finished(first.terminal);
         first.terminal.output = "exit details";
         SessionManager.Entry<Shell> second = sessions.create();
         sessions.select(first);
@@ -137,11 +141,57 @@ public class SessionManagerTest {
         assertEquals(1, sessions.entries().size());
     }
 
+    @Test public void closeAfterProcessExitWaitsForDrainedOutputCallback() throws Exception {
+        SessionManager.Entry<Shell> first = sessions.create();
+        SessionManager.Entry<Shell> second = sessions.create();
+        sessions.select(first);
+        // waitpid has completed, but the reader and final rendering have not.
+        first.terminal.running = false;
+        assertTrue(sessions.close(first));
+        assertTrue("Draining PTY must remain owned until its exit callback", sessions.entries().contains(first));
+        assertTrue(first.closing());
+        assertSame(first, sessions.selected());
+        assertSame(first, sessions.restartSelected());
+        first.terminal.output = "last buffered output";
+        assertTrue(sessions.finished(first.terminal));
+        assertFalse(sessions.entries().contains(first));
+        assertSame(second, sessions.selected());
+        assertEquals(0, second.terminal.stops);
+    }
+
+    @Test public void restartAfterProcessExitWaitsForDrainedOutputCallback() throws Exception {
+        SessionManager.Entry<Shell> first = sessions.create();
+        first.terminal.running = false;
+        assertSame("Restart must wait for the old PTY's final output", first, sessions.restartSelected());
+        assertEquals(1, sessions.entries().size());
+        first.terminal.output = "last buffered output";
+        assertTrue(sessions.finished(first.terminal));
+        assertEquals("last buffered output", sessions.selected().terminal.output);
+        SessionManager.Entry<Shell> replacement = sessions.restartSelected();
+        assertNotSame(first, replacement);
+        assertEquals(first.number, replacement.number);
+        assertEquals(2, sessions.create().number);
+    }
+
+    @Test public void stopAllKeepsDrainingPtysUntilTheirCallbacks() throws Exception {
+        SessionManager.Entry<Shell> first = sessions.create();
+        SessionManager.Entry<Shell> second = sessions.create();
+        first.terminal.running = false;
+        second.terminal.running = false;
+        sessions.closeAll();
+        assertEquals("Reaped children may still have pending PTY output", 2, sessions.entries().size());
+        sessions.finished(second.terminal);
+        assertSame(first, sessions.selected());
+        sessions.finished(first.terminal);
+        assertTrue(sessions.isEmpty());
+    }
+
     @Test public void stopAllIncludesBackgroundShellsAndWaitsForEveryExit() throws Exception {
         SessionManager.Entry<Shell> first = sessions.create();
         SessionManager.Entry<Shell> second = sessions.create();
         SessionManager.Entry<Shell> ended = sessions.create();
         ended.terminal.running = false;
+        sessions.finished(ended.terminal);
         sessions.closeAll();
         assertEquals(1, first.terminal.stops);
         assertEquals(1, second.terminal.stops);
@@ -173,6 +223,7 @@ public class SessionManagerTest {
         assertTrue(sessions.isEmpty());
         SessionManager.Entry<Shell> first = sessions.restartSelected();
         first.terminal.running = false;
+        sessions.finished(first.terminal);
         sessions.close(first);
         assertTrue(sessions.isEmpty());
         assertNull(sessions.selected());

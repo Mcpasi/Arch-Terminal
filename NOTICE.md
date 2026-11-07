@@ -1,6 +1,6 @@
 # Komponenten und Herkunft
 
-Arch Terminal 0.1.8 ist eine neue Android-App. Eigene Implementierungen sind unter GPL-3.0-or-later lizenziert; siehe LICENSE. Die Lizenzen der eingebundenen Komponenten gelten zusätzlich. Arch Linux ARM und Termux sind eigenständige Projekte; diese App wird von ihnen nicht herausgegeben.
+Arch Terminal 0.1.9 ist eine neue Android-App. Eigene Implementierungen sind unter GPL-3.0-or-later lizenziert; siehe LICENSE. Die Lizenzen der eingebundenen Komponenten gelten zusätzlich. Arch Linux ARM und Termux sind eigenständige Projekte; diese App wird von ihnen nicht herausgegeben.
 
 | Komponente | Herkunft | Lizenz / lokale Texte |
 | --- | --- | --- |

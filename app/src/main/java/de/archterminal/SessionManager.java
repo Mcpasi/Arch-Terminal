@@ -15,7 +15,7 @@ final class SessionManager<T> {
     static final class Entry<T> {
         final int number;
         final T terminal;
-        private boolean closing;
+        private boolean closing, finished;
 
         private Entry(int number, T terminal) { this.number = number; this.terminal = terminal; }
         boolean closing() { return closing; }
@@ -43,7 +43,7 @@ final class SessionManager<T> {
 
     Entry<T> restartSelected() throws Exception {
         if (selected == null) return create();
-        if (selected.closing || backend.isRunning(selected.terminal)) return selected;
+        if (selected.closing || !selected.finished || backend.isRunning(selected.terminal)) return selected;
         T terminal = backend.create();
         Entry<T> replacement = new Entry<>(selected.number, terminal);
         entries.set(entries.indexOf(selected), replacement);
@@ -59,10 +59,10 @@ final class SessionManager<T> {
 
     boolean close(Entry<T> entry) {
         if (!entries.contains(entry) || entry.closing) return false;
-        if (backend.isRunning(entry.terminal)) {
+        if (!entry.finished) {
             entry.closing = true;
             // Retain ownership until the PTY has drained output and delivered its exit callback.
-            backend.finish(entry.terminal);
+            if (backend.isRunning(entry.terminal)) backend.finish(entry.terminal);
         } else remove(entry);
         return true;
     }
@@ -70,6 +70,8 @@ final class SessionManager<T> {
     boolean finished(T terminal) {
         for (Entry<T> entry : entries) {
             if (entry.terminal == terminal) {
+                // A reaped process can still have unread or unrendered PTY output.
+                entry.finished = true;
                 if (entry.closing) remove(entry);
                 return true;
             }
