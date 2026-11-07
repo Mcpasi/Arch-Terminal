@@ -6,6 +6,8 @@ Stand: Version 0.1.6, 7. November 2026.
 
 Der erste Nutzer-Gerätetest mit 0.1.0 konnte Arch herunterladen, scheiterte beim Entpacken an der auf Android verbotenen Hardlink-Erstellung. Seit 0.1.1 werden dafür Dateikopien verwendet. Für 0.1.2 wurde der Tastaturfehler im Android-11-Emulator (AOSP x86_64) reproduziert und durch Aktivieren des Terminal-Touch-Fokus korrigiert. Der Emulator verwendet die echte Activity und JNI-PTY mit einer Android-Shell. Der komplette **ARM64-/PRoot-/Arch-Ablauf auf einem Smartphone ist weiterhin nicht abgenommen**.
 
+Der Arch-Ablauf wurde auf Version 0.1.6 erfolgreich getestet, verifieziert auf einen Redmi Note 14 und einen Redmi 14C. 
+
 - `scripts/test-device.sh` auf ARM64 Android ausführen; danach Arch in der App installieren und `scripts/test-device.sh --rootfs` ausführen.
 - Android 9/10, 13 sowie 15/16 prüfen, jeweils soweit Geräte verfügbar sind. Mindestens ein Gerät mit 16-KiB-Speicherseiten testen.
 - Den ersten Arch-Download, Unterbrechung, Fortsetzung, TLS, Abbruch beim Entpacken, Speicherknappheit und Wiederaufnahme nach einem tatsächlichen App-Prozessabbruch prüfen.
