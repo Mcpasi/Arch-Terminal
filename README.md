@@ -1,102 +1,97 @@
 # Arch Terminal
 
-Native Android-Konsole für **Arch Linux ARM aarch64**, mit C++-PTY, PRoot und pacman. Android ab 9 / API 28, ausschließlich `arm64-v8a`. Keine Termux-Installation und keine Rootrechte erforderlich.
+Arch Terminal is an Android terminal for **Arch Linux ARM (aarch64)**. It uses a native C++ PTY, PRoot and pacman to run an Arch environment without root access or a separate Termux installation. It supports Android 9 (API 28) and later on `arm64-v8a` devices.
 
-Die App zeigt echte VT-Konsolen im Vollbild: ANSI/Truecolor, UTF-8, Cursorsteuerung, alternativer Bildschirm, Scrollback, Touch-Auswahl, Tastatur und Größenänderung der PTY. Die Zusatztasten können ausgeblendet werden. Die Sitzungen gehören einem Vordergrunddienst und bleiben beim Wechsel in andere Apps oder bei ausgeschaltetem Display bestehen, solange Android den Prozess laufen lässt.
+Mcpasi is the author of Arch Terminal's original main code, including its app, PTY, installer and build scripts. The project also uses third-party components with their own authors and licenses; see [NOTICE.md](NOTICE.md) for attribution and license details.
 
-0.2.0 verwendet einen aktuellen direkten Arch-Linux-ARM-HTTPS-Mirror mit geprüftem Ausweichserver. Die neue Auswahl **Sprache / Language → English** stellt Oberfläche, Benachrichtigungen und die von der App erzeugten Konsolenhinweise auf Englisch um. Die Auswahl bleibt gespeichert; laufende Terminals bleiben erhalten, neue Shells übernehmen die Sprache. Die Auswahl ist auch vor der Arch-Installation erreichbar.
+## What it does
 
-Seit 0.1.7 können mehrere Terminals gleichzeitig laufen. **+** in der oberen Sitzungsleiste oder **Neue Sitzung** im Menü öffnet eine weitere Shell. Die Tabs wechseln zwischen den Sitzungen mit jeweils eigenem Prozess, Arbeitsverzeichnis, Shellzustand und Scrollback; alle verwenden dieselbe Arch-Installation. Langes Drücken auf einen Tab oder **Sitzung schließen** im Menü schließt nach Bestätigung nur diese Sitzung. **Alle Sitzungen beenden** und die Aktion in der Android-Benachrichtigung beenden sämtliche Sitzungen. Beendete Shells behalten ihre Ausgabe; Enter startet nur ihren Tab neu.
+- Provides a full-screen terminal with UTF-8, ANSI and true color, cursor control, an alternate screen, scrollback, text selection and PTY resizing.
+- Runs multiple independent terminal sessions against the same Arch installation. Each session has its own shell, working directory and scrollback.
+- Keeps sessions in a foreground service when you switch apps or turn off the screen, as long as Android keeps the process alive.
+- Offers German and English interface text. The selection is saved, and switching languages keeps running terminals open. New shells use the selected language.
+- Provides optional extra keys, a CPU wake lock and a PRoot compatibility mode.
 
-Seit 0.1.5 zeigt die Start-/Installationsansicht ein kleines pulsierendes Arch-Linux-Logo. Sobald eine Sitzung angezeigt wird, verschwindet es ohne zusätzliche Wartezeit. Die Animation pausiert im Hintergrund und beachtet deaktivierte Android-Animationen; die Befehlseingabe erhält die volle Terminalfläche.
+## Install and use
 
-Seit 0.1.6 bleiben Installationsbutton und Downloadhinweise beim Verbinden und beim Start einer vorhandenen Arch-Installation verborgen. Ein fehlgeschlagener Konsolenstart bietet „Konsole erneut starten“ an; „Arch installieren / fortsetzen“ erscheint ausschließlich bei bestätigter fehlender Installation.
-
-## Bauen
-
-Voraussetzungen: Linux x86_64, JDK 17, Python 3.12+, CMake ab 3.22, make, C++17-Compiler, curl, unzip, libarchive-Entwicklungsdateien; optional GnuPG und `bsdtar` für den vollständigen Rootfs-Test.
-
-```bash
-# Bei vorhandenem SDK/NDK werden die Caches verwendet.
-# Alternativ setzen: ANDROID_HOME und ANDROID_NDK_HOME.
-scripts/setup-android.sh
-scripts/test.sh
-scripts/build.sh
-```
-
-SDK 36, Build Tools 35.0.0, NDK r28c (`28.2.13676358`), Gradle 8.14.3 und AGP 8.11.0 sind festgelegt. `scripts/android-env.sh` findet auch den vorhandenen Buildozer-Cache. PRoot, talloc und libarchive werden mit SHA-256 geprüft und aus Quellen gebaut. Der Gradle-Wrapper prüft seinen Download ebenfalls.
-
-Gradle läuft standardmäßig ohne dauerhaften Daemon, mit maximal 1 GiB Java-Heap, einem Worker, einem sichtbaren JVM-Prozessor und serieller Garbage Collection; parallele Projekt-Builds und Test-Forks sind deaktiviert. Native Builds verwenden standardmäßig ebenfalls einen Worker (`ARCH_BUILD_JOBS=1`), CTest läuft seriell. Für eine zusätzliche Begrenzung auf einen verfügbaren CPU-Kern können die Skripte unter Linux mit `taskset -c <Kern>` gestartet werden. Gradle und Android-Emulator auf Rechnern mit wenig RAM nacheinander ausführen; der Emulator verwendet für ressourcenschonende Tests `-cores 1` und Softwaregrafik bei deaktiviertem Vulkan.
-
-`gradle/verification-metadata.xml` prüft die verwendeten Maven-Artefakte. Bei einem bewussten Dependency-Update die neuen Prüfsummen gegen die jeweiligen Quellen prüfen und die Metadaten zusammen mit der Versionsänderung aktualisieren.
-
-Ergebnisse:
-
-- `output/ArchTerminal-0.2.0-arm64-debug.apk` – installierbare, mit dem lokalen Android-Debugschlüssel signierte App.
-- `output/ArchTerminal-tests.apk` – eigener Android-Instrumentationstest.
-- `output/SHA256SUMS` – Prüfsummen der APKs.
-- `scripts/source-bundle.sh` – App-Quellen und exakte native Quellarchive zur Weitergabe mit einer APK.
-
-Die CI in `.github/workflows/build.yml` führt Hosttests, Java-Tests, Lint, Build und APK-Prüfung aus. Der große Rootfs-Smoke-Test ist manuell zuschaltbar. Signatur, Target 28, ARM64-ELFs und 16-KiB-Segmentausrichtung werden an der **fertigen APK** geprüft.
-
-## Auf dem Smartphone
+Install the debug APK on an ARM64 device:
 
 ```bash
 adb install -r output/ArchTerminal-0.2.0-arm64-debug.apk
 ```
 
-App öffnen und **Arch installieren / fortsetzen** wählen. Der erste Download umfasst ungefähr 791 MiB; mindestens 5 GiB freien internen Speicher vorsehen. Das Arch-Archiv wird gegen den gepinnten SHA-256 geprüft, zunächst in ein separates Verzeichnis entpackt und erst nach vollständiger Konfiguration aktiviert. Unterbrochene Downloads lassen sich fortsetzen. Ein fehlgeschlagener Installationsversuch überschreibt kein vorhandenes Arch.
+Open the app and select **Install / resume Arch**. The initial download is about 791 MiB; allow at least 5 GiB of free internal storage. The installer checks the pinned SHA-256, extracts into a separate directory and activates the installation only after configuration succeeds. Interrupted downloads can resume, and a failed installation does not overwrite an existing Arch installation.
 
-Version 0.1.4 behebt einen Startfehler aus 0.1.3: Eine fehlgeschlagene optionale Rootfs-Aktualisierung darf den Start der vorhandenen Konsole nicht verhindern. Die Konsole zeigt dazu einen Hinweis; der Reparaturlauf bleibt für einen späteren Versuch offen. Als Update über die vorhandene App installieren; Arch-Dateisystem, Pakete und eigene Konfigurationen bleiben erhalten.
-
-Seit 0.2.0 verwendet pacman `https://ca.us.mirror.archlinuxarm.org` mit RWTH Aachen über HTTPS als Ausweichserver. Beim nächsten Sitzungsstart ersetzt die App sowohl ihren alten Princeton-Standard als auch die unveränderte RWTH-/dotsrc-Liste aus 0.1.3–0.1.9. Die Migration läuft unabhängig von der früheren Verzeichnisreparatur. Eigene Mirrorlisten, Symlinks und individuelle Shell-Konfigurationen bleiben erhalten; nur exakt erkannte App-Hinweistexte in regulären Profilen werden übersetzbar gemacht. **Nach dem Update eine neue Sitzung öffnen und einmal `pacman -Syyu` ausführen**, damit veraltete Paketlisten keine nicht mehr vorhandenen Paketversionen anfordern. Paketupdates werden dabei ausdrücklich durch den Nutzer gestartet.
-
-Die Tastaturkorrektur aus 0.1.2 bleibt enthalten: Die Konsole antippen oder im Menü **Tastatur ein / aus** wählen.
-
-Der seit 0.1.1 enthaltene Fix für Archiv-Hardlinks bleibt enthalten. Nach einem in 0.1.0 gescheiterten Entpackvorgang **Arch installieren / fortsetzen** wählen: Ein vollständig geladenes Archiv wird weiterverwendet, das unvollständige Entpackverzeichnis wird neu aufgebaut. Die App dafür nicht deinstallieren.
-
-Beim ersten Login richtet die Konsole den mitgelieferten Arch-Paketschlüsselbund ein. Danach:
+The first interactive login initializes the Arch package keyring. You can then update the system and install packages:
 
 ```bash
 pacman -Syyu
 pacman -S git vim base-devel
 ```
 
-Die Daten liegen privat unter `files/arch` der App. Eine Deinstallation entfernt sie. Es gibt in dieser Version keine eingebaute Sicherung oder Dateifreigabe.
+After upgrading to 0.2.0, open a new session and run `pacman -Syyu` once to refresh outdated package databases and update the system. The app migrates its recognized default mirror lists to `https://ca.us.mirror.archlinuxarm.org`, with RWTH Aachen as an HTTPS fallback. Custom mirror lists, symlinks and shell configuration are preserved. Package updates are always started by the user.
 
-- Tippen öffnet die Bildschirmtastatur; lange drücken markiert Text zum Kopieren/Einfügen.
-- ESC, TAB, CTRL, ALT und Pfeile stehen in der unteren Leiste bereit. CTRL/ALT werden durch erneutes Antippen ausgeschaltet.
-- **Lautstärke leiser gedrückt halten** wirkt als CTRL. **Lautstärke lauter** öffnet das Menü, auch bei ausgeblendeter Leiste.
-- Die obere Leiste bleibt auch bei ausgeblendeten Zusatztasten sichtbar; **+** öffnet eine weitere Sitzung, Antippen eines Tabs wechselt die Konsole.
-- Im Menü: neue Sitzung, einzelne Sitzung schließen, alle Sitzungen beenden, Tastatur, Ctrl-C, Schriftgröße, Zusatztasten, CPU-Wachhaltung, PRoot-Kompatibilität, Sprache und Lizenzen.
-- **Sprache / Language** bietet **Deutsch** und **English**, unabhängig von der Android-Systemsprache. Englisch verwendet im Guest `C.UTF-8`; `locale-gen` oder die Installation eines Sprachpakets ist dafür nicht nötig. Eigene Shellprofile und Programme können weiterhin eigene Spracheinstellungen setzen.
-- `exit` beendet ausschließlich die jeweilige Shell. Enter startet ihren Tab neu; die anderen Sitzungen laufen weiter.
-- Der Kompatibilitätsmodus setzt für die nächste Sitzung `PROOT_NO_SECCOMP=1`.
-- Androids Meldung über das ältere Target ist wegen Target 28 zu erwarten.
+Your Arch files are stored in the app's private `files/arch` directory. **Uninstalling the app deletes them.** This version has no built-in backup, restore or file-sharing feature.
 
-## W^X und lange Laufzeiten
+If extraction failed in 0.1.0, update the app and choose **Install / resume Arch** without uninstalling it. A completed download is reused and the incomplete extraction directory is rebuilt. Version 0.1.4 also fixed a problem where an optional rootfs repair could prevent an existing console from starting; a failed repair now displays a notice and can be retried later. Updating over an existing installation preserves the Arch filesystem, packages and custom configuration.
 
-`compileSdk` und `targetSdk` erfüllen verschiedene Aufgaben: kompiliert wird gegen SDK 36; das Target bleibt bewusst auf **28**. Android untersagt ab Target 29 die direkte Ausführung von Dateien aus dem beschreibbaren App-Verzeichnis. Genau dort müssen pacman und die installierten Arch-Binaries liegen. Das ist der dokumentierte Kompatibilitätsweg, kein Kernel- oder SELinux-Patch. PRoot und sein Loader werden zusätzlich als native APK-Dateien vom Paketinstaller entpackt. [Android: Ausführungsbeschränkung](https://developer.android.com/about/versions/10/behavior-changes-10#execute-permission), [Termux-Ausführungsumgebung](https://github.com/termux/termux-packages/wiki/Termux-execution-environment).
+## Terminal controls
 
-Die App hat **keine Befehls-, Leerlauf- oder Ausgabelaufzeitgrenze**. 10.000 Scrollback-Zeilen und 256 KiB Transportpuffer begrenzen den Speicherverbrauch; zusätzliche Ausgabe verdrängt alte Anzeigezeilen bzw. erzeugt Backpressure, ohne die PTY zu beenden. Eingaben werden getrennt geschrieben, damit ein nicht lesender Prozess die Oberfläche nicht blockiert. Ein voller Eingabepuffer wird gemeldet und beendet die Sitzung ebenfalls nicht. pacmans `DisableDownloadTimeout` verhindert dessen Geschwindigkeits-/Downloadfristen.
+- Tap the terminal to open the keyboard; long-press text to select, copy or paste it.
+- Use the bottom bar for Esc, Tab, Ctrl, Alt and arrow keys. Tap Ctrl or Alt again to release it. The extra-key bar can be hidden.
+- Hold volume down for Ctrl; press volume up to open the menu, even when extra keys are hidden.
+- Tap **+** or choose **New session** to open another shell. Tap a tab to switch sessions. Long-press a tab or choose **Close session** to close only that session after confirmation.
+- **Stop all sessions** and the notification action stop every session. When a shell exits, its output remains visible; press Enter to restart that tab.
+- The menu also controls the keyboard, Ctrl-C, font size, extra keys, CPU wake lock, PRoot compatibility, language and licenses. Compatibility mode sets `PROOT_NO_SECCOMP=1` for the next session.
+- `exit` ends only the current shell; other sessions continue running.
+- English guest shells use `C.UTF-8` without installing a language pack or running `locale-gen`. Your shell profiles and programs may override language settings.
 
-Der Arch-Installer hat einen 20-Sekunden-Verbindungsaufbauversuch und keinen Lese- oder Gesamtzeitdeckel. Ein Verbindungsfehler ist erneut versuchbar und betrifft keine laufende Konsole. Prüfsummenfehler verhindern die Aktivierung eines falschen Arch-Archivs.
+## Build
 
-Vordergrunddienst und abschaltbarer, während der Arbeit gehaltener CPU-WakeLock unterstützen lange Sitzungen. Androids Prozessbeendigung, Hersteller-Energiesparregeln und Neustarts können eine unprivilegierte App weiterhin beenden. Erfolgreiche Geräte-Rückmeldungen für 0.1.6 und 0.1.8 sind dokumentiert; Langzeitverhalten unter Hersteller-Energiesparregeln und die Änderungen in 0.2.0 bleiben auf Geräten zu prüfen. Target 28 ist keine Google-Play-Veröffentlichungsstrategie. Siehe [offene Arbeiten](docs/OFFEN.md).
+You need Linux x86_64, JDK 17, Python 3.12 or later, CMake 3.22 or later, make, a C++17 compiler, curl, unzip and libarchive development files. GnuPG and `bsdtar` are optional for the full rootfs test.
+
+```bash
+# Existing SDK/NDK caches are used when available.
+# Alternatively, set ANDROID_HOME and ANDROID_NDK_HOME.
+scripts/setup-android.sh
+scripts/test.sh
+scripts/build.sh
+```
+
+The build pins SDK 36, Build Tools 35.0.0, NDK r28c (`28.2.13676358`), Gradle 8.14.3 and AGP 8.11.0. `scripts/android-env.sh` can also find an existing Buildozer cache. PRoot, talloc and libarchive are verified with SHA-256 and built from source. The Gradle wrapper verifies its download, and `gradle/verification-metadata.xml` verifies Maven artifacts. When deliberately updating dependencies, verify new checksums against their sources and update the metadata with the version change.
+
+By default Gradle uses no persistent daemon, at most 1 GiB of Java heap, one worker, one visible JVM processor and serial garbage collection; project builds and test forks do not run in parallel. Native builds default to `ARCH_BUILD_JOBS=1` and CTest runs serially. On Linux, use `taskset -c <core>` to restrict a script to one available CPU core. On low-memory machines, run Gradle and the emulator sequentially; the test emulator uses `-cores 1`, software graphics and disabled Vulkan.
+
+Build outputs:
+
+- `output/ArchTerminal-0.2.0-arm64-debug.apk`: app signed with the local Android debug key.
+- `output/ArchTerminal-tests.apk`: Android instrumentation tests.
+- `output/SHA256SUMS`: APK checksums.
+- `scripts/source-bundle.sh`: packages app sources and the exact native source archives for distribution with an APK.
+
+The CI workflow in `.github/workflows/build.yml` runs host and Java tests, lint, the build and APK verification. The large rootfs smoke test can be enabled manually. Verification checks the finished APK's signature, target 28, ARM64 ELF files and 16 KiB segment alignment.
+
+## Android compatibility and long sessions
+
+The app compiles against SDK 36 but deliberately targets **API 28**. Android restricts execution from writable app directories for apps targeting API 29 and later; pacman and installed Arch binaries need to run from that private directory. PRoot and its loader are also extracted by the package installer as native APK files. See [Android's execution restriction](https://developer.android.com/about/versions/10/behavior-changes-10#execute-permission) and the [Termux execution environment](https://github.com/termux/termux-packages/wiki/Termux-execution-environment). Android may warn about the older target. Target 28 is not a Google Play release strategy.
+
+There is no command, idle or output time limit in the app. The display keeps 10,000 scrollback lines and the output transport has a 256 KiB buffer. Old display lines are displaced or output is subject to backpressure; neither ends the PTY. Input is written separately so a process that does not read cannot freeze the interface. A full input buffer is reported without ending the session. pacman's `DisableDownloadTimeout` disables its speed/download timeouts.
+
+The installer has a 20-second connection attempt timeout but no read or total time limit. Connection failures can be retried without affecting an existing console, and a checksum mismatch prevents activation. A foreground service and an optional CPU wake lock support long sessions, but Android process termination, manufacturer power management and device restarts can still stop the app. Successful device feedback for 0.1.6 and 0.1.8 is documented; long-term behavior and the 0.2.0 changes still need device testing. See [open work](docs/OFFEN.md).
 
 ## Tests
 
 ```bash
-scripts/test.sh                   # C++-Integration, neue Java-Tests, originale Emulator-Tests, Lint
-python3 scripts/test-mirrors.py   # sequenziell: alle ARM64-Repositories, Paketdateien und Signaturen beider Mirrors
-scripts/test-rootfs.sh            # ca. 791 MiB, GPG+SHA, Entpacken, echtes ARM64-Bash/pacman unter PRoot/QEMU
-scripts/test-rootfs.sh --network  # wegwerfbares Test-Rootfs: git, mc, nodejs, npm, tree installieren und prüfen
-scripts/test-device.sh            # eigenes Test-APK auf verbundenem ARM64-Android
-scripts/test-device.sh --rootfs   # zusätzlich PRoot und pacman in bereits installiertem Arch
+scripts/test.sh                   # C++ integration, Java and original emulator tests, lint
+python3 scripts/test-mirrors.py   # check ARM64 repositories, package files and signatures on both mirrors
+scripts/test-rootfs.sh            # ~791 MiB: GPG/SHA, extraction, real ARM64 Bash and pacman under PRoot/QEMU
+scripts/test-rootfs.sh --network  # also install and check packages in a disposable test rootfs
+scripts/test-device.sh            # instrumentation on a connected ARM64 Android device
+scripts/test-device.sh --rootfs   # also test PRoot and pacman in an installed Arch environment
 ```
 
-Details und tatsächlich ausgeführte Prüfungen stehen in [TESTS.md](docs/TESTS.md). Test-Harnesses haben Fehlerfristen, damit eine fehlerhafte Testsuite beendet werden kann; diese Fristen sind kein Bestandteil der App.
+See [TESTS.md](docs/TESTS.md) for details and results actually observed. Test harness timeouts are used to detect stalled tests; they are not app session limits.
 
-Das Arch-Image ist SHA-256-gepinnt und wurde mit dem offiziellen Fingerprint `68B3537F39A313B3E574D06777193F152BDBE6A6` geprüft. Der Spiegel verwendet einen veränderlichen `latest`-Dateinamen: ändert sich sein Inhalt, muss eine neue Version ausdrücklich geprüft und `scripts/rootfs.lock.json` aktualisiert werden. Die App akzeptiert keinen neuen Hash automatisch. [Arch-Downloads und Signaturen](https://archlinuxarm.org/about/downloads).
+The Arch image is pinned by SHA-256 and was verified using the official fingerprint `68B3537F39A313B3E574D06777193F152BDBE6A6`. Because the mirror's `latest` filename can change, a new image must be verified explicitly and `scripts/rootfs.lock.json` updated. The app does not automatically accept a new hash. See [Arch Linux ARM downloads and signatures](https://archlinuxarm.org/about/downloads).
 
-Architektur: [ARCHITEKTUR.md](docs/ARCHITEKTUR.md). Komponenten und Lizenzen: [NOTICE.md](NOTICE.md).
+For technical details see [architecture](docs/ARCHITEKTUR.md), [open work](docs/OFFEN.md), [the changelog](CHANGELOG.md) and [components and licenses](NOTICE.md).

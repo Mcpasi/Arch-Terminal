@@ -1,9 +1,17 @@
-# Kompatiblität mit Packeten
+# Codex package compatibility
 
-**npm install -g @openai/codex**
+Install the package with:
 
-Codex benötigt eine bubbleware Sandbox die auf Android nicht verfügbar ist, Dies kann zu abstürzen von Codex führen, und beweist keinen fehler von Arch Terminal.
+```bash
+npm install -g @openai/codex
+```
 
-Wollen sie Codex ohne Sandbox verwenden geben sie im eingabefeld von codex `/permission` ein und wählen sie Full Access aus.
+Codex uses a bubblewrap sandbox that is not available on Android. This may cause Codex to crash and does not by itself indicate a defect in Arch Terminal.
 
-Sollten weiterhin abstürze auftretten starten sie codex ohne daemon, hierzu geben sie folgenden befehl ein: `codex --no-daemon`
+To use Codex without its sandbox, enter `/permission` in Codex and select **Full Access**. This grants broader permissions, so use it only when you trust the commands and files Codex will work with.
+
+If it still crashes, try starting Codex without the daemon:
+
+```bash
+codex --no-daemon
+```
